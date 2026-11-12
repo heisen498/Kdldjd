@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hamsi Göçü Reels</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  canvas { display: block; height: 100vh; max-width: 100vw; margin: 0 auto; object-fit: contain; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+(() => {
+  // ================= Video settings =================
+  const CW = 1080, CH = 1920, FPS = 30, DUR = 54.5;
+  const NF = FPS * DUR;
+  const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  const DISPLAY = '"Inter Display", "Inter", "DejaVu Sans", sans-serif';
+  const BODY = '"Inter", "DejaVu Sans", sans-serif';
+  const MONO = '"JetBrains Mono", "DejaVu Sans Mono", monospace';
+  const AMBER = "#ffb347", SILVER = "#d7ecf5", MUTED = "#9fbfd2";
+
+  // ================= Helpers =================
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ease = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+  const seg = (t, a, b) => ease((t - a) / (b - a));
+  const lerp = (a, b, k) => a + (b - a) * k;
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+  // ================= Geography =================
+  const LON0 = 35.75, LON1 = 40.05, LAT0 = 40.55, LAT1 = 41.85;
+  const K = Math.cos(41.1 * Math.PI / 180), S = 1000;
+  const W = (LON1 - LON0) * K * S, H = (LAT1 - LAT0) * S;
+  const KM_PER_PX = 111.2 / S;
+  const P = (lon, lat) => ({ x: (lon - LON0) * K * S, y: (LAT1 - lat) * S });
+
+  const coast = [
+    [35.75,41.60],[35.86,41.70],[35.95,41.74],[36.05,41.68],[36.15,41.50],[36.25,41.38],[36.33,41.30],
+    [36.40,41.255],[36.46,41.235],[36.55,41.28],[36.65,41.37],[36.72,41.365],[36.80,41.33],[36.90,41.27],
+    [37.00,41.23],[37.15,41.17],[37.29,41.14],[37.40,41.08],[37.50,41.04],[37.62,41.08],[37.68,41.12],
+    [37.74,41.07],[37.80,41.02],[37.88,40.99],[38.05,40.96],[38.20,40.97],[38.30,40.95],[38.39,40.93],
+    [38.55,40.975],[38.70,41.00],[38.82,41.02],[39.00,41.04],[39.14,41.07],[39.28,41.06],[39.45,41.04],
+    [39.57,41.03],[39.72,41.01],[39.85,40.98],[40.05,40.97]
+  ].map(([a, b]) => P(a, b));
+
+  const routeLL = [
+    [39.25,41.13],[39.00,41.11],[38.82,41.09],[38.60,41.05],[38.39,41.01],[38.15,41.03],[37.88,41.07],
+    [37.70,41.19],[37.50,41.12],[37.29,41.21],[37.00,41.31],[36.80,41.41],[36.65,41.45],[36.53,41.36],[36.47,41.30]
+  ];
+
+  const towns = [
+    { n: "Tonya", ll: [39.29, 40.885], tier: 0, start: true },
+    { n: "Tekkeköy", ll: [36.46, 41.215], tier: 0, end: true },
+    { n: "Samsun", ll: [36.33, 41.29], tier: 1 },
+    { n: "Ordu", ll: [37.88, 40.98], tier: 1 },
+    { n: "Giresun", ll: [38.39, 40.915], tier: 1 },
+    { n: "Trabzon", ll: [39.72, 41.0], tier: 1 },
+    { n: "Bafra", ll: [35.91, 41.57], tier: 2 },
+    { n: "Çarşamba", ll: [36.72, 41.20], tier: 2 },
+    { n: "Terme", ll: [36.97, 41.21], tier: 2 },
+    { n: "Ünye", ll: [37.28, 41.13], tier: 2 },
+    { n: "Fatsa", ll: [37.50, 41.03], tier: 2 },
+    { n: "Perşembe", ll: [37.77, 41.06], tier: 2 },
+    { n: "Bulancak", ll: [38.23, 40.94], tier: 2 },
+    { n: "Espiye", ll: [38.71, 40.95], tier: 2 },
+    { n: "Tirebolu", ll: [38.82, 41.0], tier: 2 },
+    { n: "Görele", ll: [39.0, 41.03], tier: 2 },
+    { n: "Eynesil", ll: [39.14, 41.06], tier: 2 },
+    { n: "Beşikdüzü", ll: [39.23, 41.05], tier: 2 },
+    { n: "Akçaabat", ll: [39.57, 41.02], tier: 2 }
+  ].map(t => ({ ...t, p: P(t.ll[0], t.ll[1]) }));
+
+  const seaNames = [
+    ["Tonya", [39.27, 41.08]], ["Eynesil", [39.14, 41.08]], ["Görele", [39.0, 41.06]], ["Tirebolu", [38.82, 41.04]],
+    ["Espiye", [38.7, 41.0]], ["Giresun", [38.39, 40.95]], ["Bulancak", [38.2, 40.98]], ["Ordu", [37.88, 41.02]],
+    ["Yason Burnu", [37.70, 41.15]], ["Fatsa", [37.5, 41.07]], ["Ünye", [37.29, 41.17]], ["Terme", [37.0, 41.27]],
+    ["Yeşilırmak deltası", [36.7, 41.4]], ["Tekkeköy", [36.47, 41.28]]
+  ].map(([n, ll]) => ({ n, p: P(ll[0], ll[1]) }));
+
+  const rivers = [
+    [[36.66,41.37],[36.68,41.28],[36.64,41.19],[36.70,41.08],[36.62,40.95],[36.66,40.80],[36.58,40.62]],
+    [[35.95,41.73],[35.97,41.62],[35.92,41.52],[35.96,41.40],[35.88,41.25],[35.93,41.08],[35.85,40.90]],
+    [[38.82,41.02],[38.85,40.90],[38.80,40.78],[38.86,40.62]]
+  ].map(r => r.map(([a, b]) => P(a, b)));
+
+  const boats = [[36.62,41.52,0.3],[36.86,41.44,2.2],[36.28,41.47,1.1],[37.80,41.14,0.8],[38.30,41.05,3],[39.55,41.11,1.7]]
+    .map(([a, b, ph]) => ({ ...P(a, b), ph, ang: -0.2 + ph * 0.3 }));
+
+  // ================= Route =================
+  const rp = routeLL.map(([a, b]) => P(a, b));
+  const route = [];
+  for (let i = 0; i < rp.length - 1; i++) {
+    const p0 = rp[Math.max(0, i - 1)], p1 = rp[i], p2 = rp[i + 1], p3 = rp[Math.min(rp.length - 1, i + 2)];
+    for (let s = 0; s < 40; s++) {
+      const t = s / 40, t2 = t * t, t3 = t2 * t;
+      route.push({
+        x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+      });
+    }
+  }
+  route.push({ ...rp[rp.length - 1] });
+  const cum = [0];
+  for (let i = 1; i < route.length; i++) cum.push(cum[i - 1] + Math.hypot(route[i].x - route[i - 1].x, route[i].y - route[i - 1].y));
+  const LEN = cum[cum.length - 1];
+  const TOTAL_KM = LEN * KM_PER_PX;
+  const KM_PER_DAY = 24;
+  const TOTAL_DAYS = Math.floor(TOTAL_KM / KM_PER_DAY) + 1;
+  function at(s) {
+    s = clamp(s, 0, LEN);
+    let lo = 0, hi = cum.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; }
+    const a = route[lo], b = route[hi], sg = cum[hi] - cum[lo] || 1, k = (s - cum[lo]) / sg;
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, h: Math.atan2(b.y - a.y, b.x - a.x) };
+  }
+  function sNear(lon, lat) {
+    const p = P(lon, lat); let bi = 0, bd = 1e9;
+    route.forEach((q, i) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; bi = i; } });
+    return cum[bi];
+  }
+  const END = at(LEN);
+  const NET_C = { x: END.x - 10, y: END.y - 150 }, NET_R = 115;
+
+  // Leader schedule: [time, arc-length]
+  const KEYS = [[0, 0], [14, 0], [23, sNear(38.39, 41.01)], [26.5, sNear(37.88, 41.07)], [29.5, sNear(37.70, 41.19)],
+                [38, sNear(37.0, 41.31)], [43, LEN]];
+  function leaderS(t) {
+    if (t <= KEYS[0][0]) return 0;
+    for (let i = 0; i < KEYS.length - 1; i++) {
+      const [t0, s0] = KEYS[i], [t1, s1] = KEYS[i + 1];
+      if (t <= t1) return lerp(s0, s1, (t - t0) / (t1 - t0));
+    }
+    return LEN;
+  }
+
+  // ================= Land =================
+  function curve(c, pts, sc) {
+    c.moveTo(pts[0].x * sc, pts[0].y * sc);
+    for (let i = 1; i < pts.length - 1; i++)
+      c.quadraticCurveTo(pts[i].x * sc, pts[i].y * sc, (pts[i].x + pts[i + 1].x) / 2 * sc, (pts[i].y + pts[i + 1].y) / 2 * sc);
+    c.lineTo(pts[pts.length - 1].x * sc, pts[pts.length - 1].y * sc);
+  }
+  function landPath(c, sc, bottom) {
+    c.beginPath(); curve(c, coast, sc);
+    c.lineTo((W + 3000) * sc, coast[coast.length - 1].y * sc);
+    c.lineTo((W + 3000) * sc, bottom * sc);
+    c.lineTo(-3000 * sc, bottom * sc);
+    c.lineTo(-3000 * sc, coast[0].y * sc);
+    c.closePath();
+  }
+  function coastLine(c, sc) { c.beginPath(); curve(c, coast, sc); }
+
+  const MS = 0.25;
+  const mask = document.createElement("canvas");
+  mask.width = Math.ceil(W * MS); mask.height = Math.ceil(H * MS);
+  const mctx = mask.getContext("2d");
+  mctx.fillStyle = "#000"; landPath(mctx, MS, H + 100); mctx.fill();
+  const mdata = mctx.getImageData(0, 0, mask.width, mask.height).data;
+  function isLand(x, y) {
+    const ix = Math.floor(x * MS), iy = Math.floor(y * MS);
+    if (iy < 0) return false;
+    if (ix < 0 || ix >= mask.width || iy >= mask.height) return iy >= mask.height;
+    return mdata[(iy * mask.width + ix) * 4 + 3] > 100;
+  }
+
+  const TS = 0.8;
+  const tex = document.createElement("canvas");
+  tex.width = Math.ceil(W * TS); tex.height = Math.ceil(H * TS);
+  (() => {
+    const c = tex.getContext("2d");
+    c.save(); landPath(c, TS, H + 100); c.clip();
+    const g = c.createLinearGradient(0, 250 * TS, 0, tex.height);
+    g.addColorStop(0, "#336240"); g.addColorStop(0.35, "#24492f"); g.addColorStop(1, "#122a1c");
+    c.fillStyle = g; c.fillRect(0, 0, tex.width, tex.height);
+    for (let i = 0; i < 11000; i++) {
+      const x = rnd() * tex.width, y = rnd() * tex.height, r = 3 + rnd() * 11;
+      c.fillStyle = rnd() < 0.55 ? "rgba(8,26,16,0.17)" : "rgba(90,140,85,0.08)";
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    c.strokeStyle = "rgba(170,210,170,0.10)"; c.lineWidth = 1.6;
+    for (let k = 0; k < 10; k++) {
+      c.beginPath();
+      const y0 = (0.95 + k * 0.035) * S * TS;
+      for (let x = 0; x <= tex.width; x += 18) {
+        const y = y0 - 30 * Math.sin(x * 0.004 + k) - 14 * Math.sin(x * 0.013 + k * 2);
+        x === 0 ? c.moveTo(x, y) : c.lineTo(x, y);
+      }
+      c.stroke();
+    }
+    [[36.0, 41.6, 90], [36.7, 41.28, 85]].forEach(([lo, la, r]) => {
+      const p = P(lo, la);
+      const rg = c.createRadialGradient(p.x * TS, p.y * TS, 0, p.x * TS, p.y * TS, r * TS * 1.4);
+      rg.addColorStop(0, "rgba(160,175,90,0.5)"); rg.addColorStop(1, "rgba(160,175,90,0)");
+      c.fillStyle = rg; c.fillRect(0, 0, tex.width, tex.height);
+    });
+    // tea gardens hint on eastern slopes
+    for (let i = 0; i < 1600; i++) {
+      const x = (0.62 + rnd() * 0.38) * tex.width, y = (0.36 + rnd() * 0.2) * tex.height;
+      c.strokeStyle = "rgba(120,190,110,0.10)"; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + 8, y + 1); c.stroke();
+    }
+    c.restore();
+    c.strokeStyle = "rgba(230,215,165,0.6)"; c.lineWidth = 2.4; coastLine(c, TS); c.stroke();
+  })();
+
+  const waves = [];
+  for (let i = 0; i < 2600; i++) {
+    const x = -200 + rnd() * (W + 400), y = -900 + rnd() * (H + 900);
+    if (!isLand(x, y + 8)) waves.push({ x, y, ph: rnd() * 6.28, l: 6 + rnd() * 12 });
+  }
+
+  // ================= Simulation =================
+  const N = 480;
+  const st = { t: 0, s: 0, v: 0 };
+  let fish = [], dolphins = [], splashes = [];
+  const OVERVIEW = { x: (rp[0].x + rp[rp.length - 1].x) / 2, y: (rp[0].y + rp[rp.length - 1].y) / 2 + 120, z: CW / (Math.abs(rp[0].x - rp[rp.length - 1].x) + 260) };
+  const cam = { ...OVERVIEW };
+  const gulls = Array.from({ length: 9 }, () => ({ a: rnd() * 6.28, r: 50 + rnd() * 90, w: (0.5 + rnd() * 0.6) * (rnd() < 0.5 ? -1 : 1), ph: rnd() * 6.28 }));
+
+  function spawnFish() {
+    const L = at(0);
+    fish = [];
+    for (let i = 0; i < N; i++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd());
+      let x = L.x + Math.cos(a) * (140 + rnd() * 320), y = L.y + Math.sin(a) * (90 + rnd() * 200) - 60;
+      while (isLand(x, y)) y -= 20;
+      fish.push({
+        x, y, vx: (rnd() - 0.5) * 30, vy: (rnd() - 0.5) * 30,
+        ox: Math.cos(a) * r * 95, oy: Math.sin(a) * r * 42,
+        ph: rnd() * 6.28, mill: 0.15 + Math.sqrt(rnd()) * 0.85, ma: rnd() * 6.28, sz: 0.85 + rnd() * 0.3
+      });
+    }
+  }
+
+  const grid = new Map(), CELL = 16;
+  function centroid() {
+    let x = 0, y = 0; for (const f of fish) { x += f.x; y += f.y; }
+    return fish.length ? { x: x / fish.length, y: y / fish.length } : at(0);
+  }
+
+  function step(dt) {
+    const t = st.t + dt;
+    const ns = leaderS(t);
+    st.v = (ns - st.s) / dt; st.s = ns; st.t = t;
+    if (t < 10.5) return;
+    if (!fish.length) spawnFish();
+    const L = at(st.s), c = Math.cos(L.h), s = Math.sin(L.h);
+    const arrived = t >= 43;
+
+    // ---- dolphins: scripted pod near Ordu ----
+    if (t >= 24.8 && !st.pod) {
+      st.pod = true;
+      for (let k = 0; k < 3; k++) {
+        dolphins.push({ x: L.x - 160 + k * 30, y: L.y - 340 - k * 26, vx: -c * 60, vy: 120, ph: rnd() * 6, k, trail: [] });
+      }
+    }
+    if (dolphins.length) {
+      const cen = centroid();
+      for (const d of dolphins) {
+        let tx, ty;
+        if (t < 29.2) { const off = Math.sin(t * 1.3 + d.k * 2) * 60; tx = cen.x + off * s + (d.k - 1) * 30; ty = cen.y - off * c; }
+        else { tx = d.x - 300; ty = d.y - 900; }
+        const dx = tx - d.x, dy = ty - d.y, dd = Math.hypot(dx, dy) || 1;
+        const sp = 210;
+        d.vx += (dx / dd * sp - d.vx) * 1.4 * dt; d.vy += (dy / dd * sp - d.vy) * 1.4 * dt;
+        if (isLand(d.x + d.vx * 0.5, d.y + d.vy * 0.5)) d.vy -= 600 * dt;
+        d.x += d.vx * dt; d.y += d.vy * dt;
+        if ((st.frameTick | 0) % 2 === 0) { d.trail.push({ x: d.x, y: d.y }); if (d.trail.length > 26) d.trail.shift(); }
+      }
+      if (t > 33) dolphins = [];
+    }
+
+    // ---- gull dives (splashes) ----
+    const diveRate = (t > 24.5 && t < 30) ? 5 : (t > 43 && t < 48) ? 3 : (t > 15 ? 0.5 : 0);
+    if (rnd() < diveRate * dt && fish.length) {
+      const f = fish[(rnd() * fish.length) | 0];
+      splashes.push({ x: f.x, y: f.y, t0: t });
+    }
+    splashes = splashes.filter(p => t - p.t0 < 1.1);
+
+    // ---- fish ----
+    grid.clear();
+    for (let i = 0; i < fish.length; i++) {
+      const f = fish[i], key = ((f.x / CELL) | 0) * 4096 + ((f.y / CELL) | 0);
+      let b = grid.get(key); if (!b) grid.set(key, b = []); b.push(i);
+    }
+    const maxV = Math.max(40, st.v * 1.9 + 45);
+    const netK = 1 - 0.4 * seg(t, 46, 48.5);
+    for (let i = 0; i < fish.length; i++) {
+      const f = fish[i];
+      let tx, ty;
+      if (arrived) {
+        f.ma += dt * (0.5 + (1 - f.mill) * 0.6);
+        const cx = lerp(END.x, NET_C.x, seg(t, 43, 44.5)), cy = lerp(END.y, NET_C.y, seg(t, 43, 44.5));
+        const r = f.mill * NET_R * 0.78 * netK;
+        tx = cx + Math.cos(f.ma) * r; ty = cy + Math.sin(f.ma) * r;
+      } else {
+        const pul = 1 + 0.14 * Math.sin(t * 0.8 + f.ph);
+        const ox = f.ox * pul + Math.sin(t * 1.3 + f.ph * 3) * 6, oy = f.oy * (2 - pul);
+        tx = L.x + ox * c - oy * s; ty = L.y + ox * s + oy * c;
+      }
+      let ax = 0, ay = 0;
+      const dx = tx - f.x, dy = ty - f.y, dd = Math.hypot(dx, dy) || 1;
+      const want = Math.min(maxV, st.v * 0.9 + dd * 1.4);
+      ax += (dx / dd * want - f.vx) * 1.8; ay += (dy / dd * want - f.vy) * 1.8;
+
+      const gx = (f.x / CELL) | 0, gy = (f.y / CELL) | 0;
+      let sx = 0, sy = 0, avx = 0, avy = 0, n = 0;
+      for (let u = -1; u <= 1; u++) for (let v = -1; v <= 1; v++) {
+        const b = grid.get((gx + u) * 4096 + gy + v); if (!b) continue;
+        for (const j of b) {
+          if (j === i) continue;
+          const o = fish[j], qx = f.x - o.x, qy = f.y - o.y, q2 = qx * qx + qy * qy;
+          if (q2 < 256) {
+            if (q2 < 40 && q2 > 0.01) { sx += qx / q2; sy += qy / q2; }
+            avx += o.vx; avy += o.vy; n++;
+          }
+        }
+      }
+      ax += sx * 280; ay += sy * 280;
+      if (n) { ax += (avx / n - f.vx) * 0.9; ay += (avy / n - f.vy) * 0.9; }
+
+      let fleeing = false;
+      for (const d of dolphins) {
+        const qx = f.x - d.x, qy = f.y - d.y, q = Math.hypot(qx, qy);
+        if (q < 85) { const k = (1 - q / 85) * 2200 / (q || 1); ax += qx * k; ay += qy * k; fleeing = true; }
+      }
+      if (isLand(f.x + f.vx * 0.5, f.y + f.vy * 0.5)) { ay -= 450; f.vy = Math.min(f.vy, 0); }
+
+      f.vx += ax * dt; f.vy += ay * dt;
+      const sp = Math.hypot(f.vx, f.vy), lim = fleeing ? maxV * 2.4 : (dolphins.length ? maxV * 1.6 : maxV);
+      if (sp > lim) { f.vx *= lim / sp; f.vy *= lim / sp; }
+      f.x += f.vx * dt; f.y += f.vy * dt;
+    }
+    for (const g of gulls) g.a += g.w * dt;
+  }
+
+  function updateCamera(dt) {
+    const t = st.t;
+    let tg;
+    if (t < 11) tg = OVERVIEW;
+    else {
+      const cen = centroid(), L = at(st.s);
+      let z = 2.0, ax = Math.cos(L.h) * 70, ay = Math.sin(L.h) * 70, x = cen.x, y = cen.y;
+      if (t > 24 && t < 30.5) { z = 1.5; ax *= 0.3; ay *= 0.3; }
+      if (t >= 42.5) { z = 1.55; x = NET_C.x; y = NET_C.y + 10; ax = ay = 0; }
+      tg = { x: x + ax, y: y + ay + 150 / z, z };
+    }
+    const k = 1 - Math.exp(-dt * 2.4), kz = 1 - Math.exp(-dt * 1.7);
+    cam.x += (tg.x - cam.x) * k; cam.y += (tg.y - cam.y) * k;
+    cam.z = Math.exp(lerp(Math.log(cam.z), Math.log(tg.z), kz));
+  }
+
+  // ================= Drawing: map =================
+  const toS = (x, y) => ({ x: (x - cam.x) * cam.z + CW / 2, y: (y - cam.y) * cam.z + CH / 2 });
+
+  function drawTopFish(f, len, z, t) {
+    const sp = Math.hypot(f.vx, f.vy) || 1, dx = f.vx / sp, dy = f.vy / sp, nx = -dy, ny = dx;
+    const L = len * f.sz, wid = L * 0.16;
+    const wig = Math.sin(t * (9 + sp * 0.05) + f.ph) * 0.35;
+    const ang = Math.atan2(dy, dx);
+    const lum = 56 + 34 * Math.max(0, Math.cos(ang * 2 - t * 0.6 + f.ph * 0.2));
+    const hx = f.x + dx * L * 0.5, hy = f.y + dy * L * 0.5;
+    const tbx = f.x - dx * L * 0.38, tby = f.y - dy * L * 0.38;
+    const tdx = dx + nx * wig, tdy = dy + ny * wig;
+    ctx.fillStyle = `hsl(198,45%,${lum.toFixed(0)}%)`;
+    ctx.beginPath();
+    ctx.moveTo(hx, hy);
+    ctx.quadraticCurveTo(f.x + nx * wid * 1.6, f.y + ny * wid * 1.6, tbx, tby);
+    ctx.quadraticCurveTo(f.x - nx * wid * 1.6, f.y - ny * wid * 1.6, hx, hy);
+    ctx.moveTo(tbx, tby);
+    ctx.lineTo(tbx - tdx * L * 0.22 + nx * L * 0.13, tby - tdy * L * 0.22 + ny * L * 0.13);
+    ctx.lineTo(tbx - tdx * L * 0.22 - nx * L * 0.13, tby - tdy * L * 0.22 - ny * L * 0.13);
+    ctx.fill();
+    if (z > 1) {
+      ctx.strokeStyle = "rgba(18,60,88,0.85)"; ctx.lineWidth = L * 0.07;
+      ctx.beginPath(); ctx.moveTo(hx - dx * L * 0.1, hy - dy * L * 0.1); ctx.lineTo(tbx, tby); ctx.stroke();
+    }
+  }
+
+  function drawBoat(x, y, ang, sc, t, ph, wake) {
+    ctx.save(); ctx.translate(x, y + Math.sin(t * 1.6 + ph) * 1.2); ctx.rotate(ang + Math.sin(t * 0.7 + ph) * 0.05); ctx.scale(sc, sc);
+    if (wake) { ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.beginPath(); ctx.moveTo(-10, -2); ctx.lineTo(-38, -8); ctx.lineTo(-38, 8); ctx.lineTo(-10, 2); ctx.fill(); }
+    ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.ellipse(2, 3, 13, 4.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#1f4f7a";
+    ctx.beginPath(); ctx.moveTo(-11, -4); ctx.lineTo(8, -4); ctx.lineTo(14, 0); ctx.lineTo(8, 4); ctx.lineTo(-11, 4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#f2efe6"; ctx.fillRect(-7, -2.6, 9, 5.2);
+    ctx.fillStyle = "#c62f2f"; ctx.fillRect(-11, -4.6, 22, 1.2); ctx.fillRect(-11, 3.4, 22, 1.2);
+    ctx.fillStyle = AMBER; ctx.beginPath(); ctx.arc(5, 0, 1.6, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawMap(t) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const bg = ctx.createLinearGradient(0, 0, 0, CH);
+    bg.addColorStop(0, "#03101c"); bg.addColorStop(1, "#0a2c43");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, CW, CH);
+
+    const z = cam.z;
+    ctx.setTransform(z, 0, 0, z, CW / 2 - cam.x * z, CH / 2 - cam.y * z);
+    const vx0 = cam.x - CW / 2 / z, vx1 = cam.x + CW / 2 / z, vy0 = cam.y - CH / 2 / z, vy1 = cam.y + CH / 2 / z;
+
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    [[130, "rgba(40,140,160,0.10)"], [55, "rgba(60,170,180,0.14)"], [18, "rgba(130,215,205,0.20)"]].forEach(([w, c]) => {
+      ctx.strokeStyle = c; ctx.lineWidth = w; coastLine(ctx, 1); ctx.stroke();
+    });
+
+    ctx.lineWidth = 1.3 / Math.max(z, 0.5);
+    for (const w of waves) {
+      if (w.x < vx0 - 20 || w.x > vx1 + 20 || w.y < vy0 - 20 || w.y > vy1 + 20) continue;
+      const a = 0.07 + 0.13 * (0.5 + 0.5 * Math.sin(t * 1.4 + w.ph));
+      ctx.strokeStyle = `rgba(175,220,240,${a.toFixed(3)})`;
+      const ox = Math.sin(t * 0.6 + w.ph) * 3;
+      ctx.beginPath(); ctx.moveTo(w.x + ox - w.l / 2, w.y); ctx.quadraticCurveTo(w.x + ox, w.y - 2.5, w.x + ox + w.l / 2, w.y); ctx.stroke();
+    }
+
+    ctx.drawImage(tex, 0, 0, W, H);
+    ctx.fillStyle = "#122a1c"; ctx.fillRect(-3000, H - 2, W + 6000, 5000);
+    ctx.fillStyle = "#24492f";
+    ctx.save(); landPath(ctx, 1, H); ctx.clip();
+    ctx.fillRect(-3000, 0, 3000, H); ctx.fillRect(W, 0, 3000, H);
+    ctx.restore();
+
+    ctx.strokeStyle = "rgba(95,175,215,0.6)"; ctx.lineWidth = 2.6;
+    for (const r of rivers) { ctx.beginPath(); curve(ctx, r, 1); ctx.stroke(); }
+
+    // route
+    const drawFrac = t < 11 ? seg(t, 5.6, 9.4) : 1;
+    const sDraw = drawFrac * LEN;
+    if (t >= 11) {
+      ctx.setLineDash([12 / z, 10 / z]); ctx.lineWidth = 2 / z; ctx.strokeStyle = "rgba(255,179,71,0.38)";
+      ctx.beginPath(); route.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    const sBright = t < 11 ? sDraw : st.s;
+    if (sBright > 0) {
+      ctx.strokeStyle = "rgba(255,179,71,0.25)"; ctx.lineWidth = 12 / z;
+      const pathTo = () => {
+        ctx.beginPath(); ctx.moveTo(route[0].x, route[0].y);
+        for (let i = 1; i < route.length && cum[i] <= sBright; i++) ctx.lineTo(route[i].x, route[i].y);
+        const e = at(sBright); ctx.lineTo(e.x, e.y);
+      };
+      pathTo(); ctx.stroke();
+      ctx.strokeStyle = AMBER; ctx.lineWidth = 4 / z; pathTo(); ctx.stroke();
+      if (t < 11 && drawFrac < 1) { const e = at(sDraw); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(e.x, e.y, 9 / z, 0, 7); ctx.fill(); }
+    }
+
+    // net (purse seine)
+    if (t > 43.2) {
+      const a0 = -Math.PI * 0.15, prog = seg(t, 43.4, 46.4);
+      const R = NET_R * (1 - 0.32 * seg(t, 46.4, 48.8));
+      const a1 = a0 + prog * Math.PI * 2;
+      if (prog >= 0.999) {
+        ctx.fillStyle = "rgba(255,240,200,0.06)"; ctx.beginPath(); ctx.arc(NET_C.x, NET_C.y, R, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = "#ffe9b0";
+      for (let a = a0; a <= a1; a += 0.07) {
+        ctx.beginPath(); ctx.arc(NET_C.x + Math.cos(a) * R, NET_C.y + Math.sin(a) * R, 2.2, 0, 7); ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(255,233,176,0.35)"; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(NET_C.x, NET_C.y, R, a0, a1); ctx.stroke();
+      // helper boat at start, main boat moving
+      drawBoat(NET_C.x + Math.cos(a0) * R, NET_C.y + Math.sin(a0) * R, a0 + Math.PI / 2, 1.5, t, 0.4, false);
+      drawBoat(NET_C.x + Math.cos(a1) * (R + 6), NET_C.y + Math.sin(a1) * (R + 6), a1 + Math.PI / 2, 1.7, t, 1.2, prog < 0.999);
+    }
+    for (const b of boats) drawBoat(b.x, b.y, b.ang, Math.min(2.4, Math.max(1.2, 1.6 / z)), t, b.ph, false);
+
+    // splashes
+    for (const p of splashes) {
+      const k = (t - p.t0) / 1.1;
+      ctx.strokeStyle = `rgba(255,255,255,${(0.8 * (1 - k)).toFixed(3)})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3 + k * 16, 0, 7); ctx.stroke();
+      if (k < 0.3) { ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 7); ctx.fill(); }
+    }
+
+    // fish: shadows, then bodies
+    if (fish.length) {
+      const fl = Math.max(7.5, 3 / z);
+      ctx.fillStyle = "rgba(0,10,20,0.28)";
+      for (const f of fish) {
+        if (f.x < vx0 - 20 || f.x > vx1 + 20 || f.y < vy0 - 20 || f.y > vy1 + 20) continue;
+        ctx.beginPath(); ctx.arc(f.x + 3, f.y + 5, fl * 0.22, 0, 7); ctx.fill();
+      }
+      for (const f of fish) {
+        if (f.x < vx0 - 20 || f.x > vx1 + 20 || f.y < vy0 - 20 || f.y > vy1 + 20) continue;
+        drawTopFish(f, fl, z, t);
+      }
+    }
+
+    // dolphins
+    for (const d of dolphins) {
+      ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = 3;
+      ctx.beginPath(); d.trail.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+      const ang = Math.atan2(d.vy, d.vx);
+      ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(ang); ctx.scale(1.25, 1.25);
+      const tail = Math.sin(t * 10 + d.ph) * 3;
+      ctx.fillStyle = "rgba(0,10,20,0.3)"; ctx.beginPath(); ctx.ellipse(3, 6, 14, 4, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#8a9aa6";
+      ctx.beginPath(); ctx.ellipse(0, 0, 14, 3.8, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(14, -0.6); ctx.lineTo(19, 0.4); ctx.lineTo(13, 1.6); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(-19, -5 + tail); ctx.lineTo(-17, tail * 0.3); ctx.lineTo(-19, 5 + tail); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#5c6b76";
+      ctx.beginPath(); ctx.moveTo(-1, -1); ctx.lineTo(-5, -6.5); ctx.lineTo(3, -1.5); ctx.fill();
+      ctx.restore();
+    }
+
+    // gulls
+    if (t > 14.5 && fish.length) {
+      const cen = t >= 43 ? NET_C : centroid(), ga = seg(t, 14.5, 16);
+      for (const g of gulls) {
+        const gx = cen.x + Math.cos(g.a) * g.r, gy = cen.y - 30 + Math.sin(g.a) * g.r * 0.7;
+        const flap = Math.sin(t * 8 + g.ph) * 0.6;
+        const head = g.a + (g.w > 0 ? Math.PI / 2 : -Math.PI / 2);
+        ctx.globalAlpha = ga;
+        ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.beginPath(); ctx.arc(gx + 12, gy + 18, 2.2, 0, 7); ctx.fill();
+        ctx.save(); ctx.translate(gx, gy); ctx.rotate(head); ctx.scale(1.5, 1.5);
+        ctx.strokeStyle = "#fbfdff"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(-1, -7); ctx.quadraticCurveTo(-1 + flap * 2, -2, 1, 0); ctx.quadraticCurveTo(-1 + flap * 2, 2, -1, 7); ctx.stroke();
+        ctx.restore(); ctx.globalAlpha = 1;
+      }
+    }
+
+    // labels
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.textBaseline = "middle";
+    for (const tw of towns) {
+      if (tw.tier === 2 && z < 0.6) continue;
+      let pop = 1;
+      if (t < 11) { if (tw.start) pop = seg(t, 5.0, 5.6); else if (tw.end) pop = seg(t, 9.2, 9.8); }
+      if (pop <= 0) continue;
+      const p = toS(tw.p.x, tw.p.y);
+      if (p.x < -100 || p.x > CW + 100 || p.y < -40 || p.y > CH + 40) continue;
+      const special = tw.start || tw.end;
+      ctx.globalAlpha = pop;
+      ctx.fillStyle = special ? AMBER : "#eaf3f8";
+      const r = (special ? 9 : 5) * (0.6 + 0.4 * pop);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill();
+      if (special) { ctx.strokeStyle = "rgba(255,179,71,0.55)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, 17 + Math.sin(t * 3) * 4, 0, 7); ctx.stroke(); }
+      ctx.font = `${special || tw.tier === 1 ? 700 : 600} ${special ? 34 : tw.tier === 1 ? 28 : 24}px ${BODY}`;
+      const label = tw.n;
+      const w = ctx.measureText(label).width;
+      const left = tw.end || p.x + 16 + w > CW - 20;
+      const lx = left ? p.x - 16 - w : p.x + 16, ly = p.y + (tw.end ? 26 : 18);
+      ctx.lineWidth = 7; ctx.strokeStyle = "rgba(4,18,12,0.85)"; ctx.lineJoin = "round";
+      ctx.strokeText(label, lx, ly); ctx.fillText(label, lx, ly);
+      ctx.globalAlpha = 1;
+    }
+    const sl = toS(P(37.9, 41.62).x, P(37.9, 41.62).y);
+    ctx.font = `700 ${clamp(60 * z, 22, 60)}px ${DISPLAY}`;
+    ctx.letterSpacing = "12px";
+    ctx.fillStyle = "rgba(150,185,205,0.32)"; ctx.textAlign = "center";
+    ctx.fillText("KARADENİZ", sl.x, sl.y);
+    ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+  }
+
+  // ================= Drawing: underwater scenes =================
+  const sideFish = Array.from({ length: 70 }, () => {
+    const depth = rnd();
+    return { x0: rnd() * 1600, y: 200 + rnd() * 1520, len: 70 + depth * 150, depth, v: 90 + depth * 160, ph: rnd() * 6.28 };
+  }).sort((a, b) => a.depth - b.depth);
+  const bubbles = Array.from({ length: 70 }, () => ({ x: rnd() * CW, y0: rnd() * CH, r: 2 + rnd() * 7, v: 40 + rnd() * 90, ph: rnd() * 6 }));
+
+  function drawAnchovy(x, y, L, ph, alpha) {
+    ctx.save(); ctx.translate(x, y); ctx.globalAlpha = alpha;
+    const tw = Math.sin(ph) * L * 0.05;
+    const g = ctx.createLinearGradient(0, -L * 0.1, 0, L * 0.1);
+    g.addColorStop(0, "#245f7c"); g.addColorStop(0.4, "#7fb6cc"); g.addColorStop(0.58, "#eef7fa"); g.addColorStop(1, "#c7dde6");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(-L * 0.5, 0);
+    ctx.bezierCurveTo(-L * 0.42, -L * 0.075, -L * 0.15, -L * 0.095, L * 0.12, -L * 0.07);
+    ctx.quadraticCurveTo(L * 0.32, -L * 0.045, L * 0.41, tw - L * 0.018);
+    ctx.lineTo(L * 0.41, tw + L * 0.018);
+    ctx.quadraticCurveTo(L * 0.32, L * 0.05, L * 0.1, L * 0.072);
+    ctx.bezierCurveTo(-L * 0.15, L * 0.09, -L * 0.42, L * 0.07, -L * 0.5, 0);
+    ctx.fill();
+    // forked tail
+    ctx.fillStyle = "#4f8fa8";
+    ctx.beginPath();
+    ctx.moveTo(L * 0.4, tw);
+    ctx.lineTo(L * 0.56, tw * 1.6 - L * 0.1);
+    ctx.lineTo(L * 0.5, tw * 1.4);
+    ctx.lineTo(L * 0.56, tw * 1.6 + L * 0.1);
+    ctx.closePath(); ctx.fill();
+    // dorsal & anal fins
+    ctx.beginPath(); ctx.moveTo(-L * 0.02, -L * 0.088); ctx.lineTo(L * 0.06, -L * 0.15); ctx.lineTo(L * 0.1, -L * 0.075); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(L * 0.16, L * 0.06); ctx.lineTo(L * 0.22, L * 0.1); ctx.lineTo(L * 0.27, L * 0.05); ctx.fill();
+    // silver lateral band
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = L * 0.022;
+    ctx.beginPath(); ctx.moveTo(-L * 0.3, -L * 0.005); ctx.quadraticCurveTo(L * 0.05, -L * 0.012, L * 0.38, tw); ctx.stroke();
+    // mouth (long jaw past the eye) and eye
+    ctx.strokeStyle = "rgba(20,40,55,0.7)"; ctx.lineWidth = L * 0.008;
+    ctx.beginPath(); ctx.moveTo(-L * 0.49, L * 0.006); ctx.lineTo(-L * 0.33, L * 0.035); ctx.stroke();
+    ctx.fillStyle = "#e9f2f5"; ctx.beginPath(); ctx.arc(-L * 0.4, -L * 0.018, L * 0.033, 0, 7); ctx.fill();
+    ctx.fillStyle = "#0b1b26"; ctx.beginPath(); ctx.arc(-L * 0.405, -L * 0.018, L * 0.021, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.beginPath(); ctx.arc(-L * 0.41, -L * 0.024, L * 0.006, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawUnderwater(t, alpha) {
+    if (alpha <= 0) return;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha;
+    const g = ctx.createLinearGradient(0, 0, 0, CH);
+    g.addColorStop(0, "#1b6a8a"); g.addColorStop(0.35, "#0b3d58"); g.addColorStop(1, "#020f1a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
+    // light rays
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 7; i++) {
+      const x = 80 + i * 160 + Math.sin(t * 0.5 + i) * 40, w = 50 + 30 * Math.sin(i * 3.1);
+      const rg = ctx.createLinearGradient(0, 0, 0, CH * 0.85);
+      rg.addColorStop(0, `rgba(160,220,240,${0.10 * alpha})`); rg.addColorStop(1, "rgba(160,220,240,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.moveTo(x, -10); ctx.lineTo(x + w, -10); ctx.lineTo(x + w * 2.6 + 120, CH * 0.85); ctx.lineTo(x + 120, CH * 0.85); ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    // fish swimming west (to the left)
+    for (const f of sideFish) {
+      const span = CW + 500;
+      const x = ((f.x0 - f.v * t) % span + span) % span - 250;
+      const y = f.y + Math.sin(t * 1.2 + f.ph) * 10;
+      drawAnchovy(x, y, f.len, t * (8 + f.depth * 4) + f.ph, (0.35 + f.depth * 0.65) * alpha);
+    }
+    // bubbles
+    ctx.globalAlpha = alpha;
+    for (const b of bubbles) {
+      const y = ((b.y0 - b.v * t) % (CH + 40) + CH + 40) % (CH + 40) - 20;
+      ctx.strokeStyle = "rgba(220,245,255,0.45)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(b.x + Math.sin(t * 2 + b.ph) * 6, y, b.r, 0, 7); ctx.stroke();
+    }
+    // vignette
+    const vg = ctx.createRadialGradient(CW / 2, CH / 2, CH * 0.25, CW / 2, CH / 2, CH * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,8,16,0.6)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, CW, CH);
+    ctx.restore();
+  }
+
+  // ================= Drawing: text overlays =================
+  function textShadow(on) {
+    ctx.shadowColor = on ? "rgba(0,0,0,0.55)" : "transparent"; ctx.shadowBlur = on ? 18 : 0; ctx.shadowOffsetY = on ? 4 : 0;
+  }
+  function wrap(text, maxW) {
+    const words = text.split(" "), lines = []; let cur = "";
+    for (const w of words) { const n = cur ? cur + " " + w : w; if (ctx.measureText(n).width > maxW && cur) { lines.push(cur); cur = w; } else cur = n; }
+    if (cur) lines.push(cur); return lines;
+  }
+
+  function drawTitle(t) {
+    const a = 1 - seg(t, 4.1, 4.9);
+    if (a <= 0) return;
+    ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    textShadow(true);
+    const k1 = seg(t, 0.2, 1.0), k2 = seg(t, 0.6, 1.4), k3 = seg(t, 1.2, 2.0);
+    ctx.font = `600 30px ${BODY}`; ctx.letterSpacing = "8px"; ctx.fillStyle = MUTED;
+    ctx.globalAlpha = a * k1; ctx.fillText("KARADENİZ'İN GÜMÜŞ YOLCULUĞU", CW / 2 + 4, 700 - 20 * (1 - k1));
+    ctx.letterSpacing = "-4px";
+    ctx.font = `900 210px ${DISPLAY}`;
+    const sg = ctx.createLinearGradient(0, 720, 0, 900);
+    sg.addColorStop(0, "#ffffff"); sg.addColorStop(0.55, "#bfe0ee"); sg.addColorStop(1, "#7fb3c9");
+    ctx.fillStyle = sg; ctx.globalAlpha = a * k2;
+    ctx.fillText("HAMSİ", CW / 2, 900 + 30 * (1 - k2));
+    ctx.fillStyle = AMBER;
+    ctx.fillText("GÖÇÜ", CW / 2, 1090 + 30 * (1 - k2));
+    ctx.letterSpacing = "0px";
+    ctx.globalAlpha = a * k3; ctx.font = `600 54px ${BODY}`; ctx.fillStyle = "#fff";
+    ctx.fillText("Tonya'dan Tekkeköy'e", CW / 2, 1210 + 20 * (1 - k3));
+    ctx.restore();
+  }
+
+  const captions = [
+    [5.0, 10.8, "ROTA", "Tonya → Tekkeköy", `Doğu Karadeniz kıyısı boyunca ~${Math.round(TOTAL_KM / 10) * 10} km`],
+    [11.3, 14.6, "1. GÜN", "Tonya açıkları", "Sürü kıyının önünde toplanıyor"],
+    [15.0, 23.6, "YOLCULUK BAŞLIYOR", "Batıya, kıyı boyunca", "Martılar sürüyü yukarıdan izliyor"],
+    [24.4, 30.0, "TEHLİKE", "Yunus saldırısı!", "Sürü sıkışıyor, dağılıyor, yeniden toplanıyor"],
+    [30.5, 37.8, "YASON BURNU · ÜNYE", "Kıyıya yakın sular", "Sürü burnu dönüp Ünye körfezine giriyor"],
+    [38.2, 42.8, "YEŞİLIRMAK DELTASI", "Son düzlük", "Samsun körfezine giriliyor"],
+    [43.2, 47.7, `VARIŞ · ${TOTAL_DAYS}. GÜN`, "Tekkeköy açıkları", "Gırgır teknesi ağı sürünün etrafına çeviriyor"]
+  ];
+  function drawCaption(t) {
+    for (const [t0, t1, kick, title, sub] of captions) {
+      if (t < t0 || t > t1) continue;
+      const a = seg(t, t0, t0 + 0.45) * (1 - seg(t, t1 - 0.4, t1));
+      const dy = 26 * (1 - seg(t, t0, t0 + 0.5));
+      ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      const x = 70, y = 300 + dy;
+      // backdrop
+      ctx.font = `800 76px ${DISPLAY}`;
+      const tw = ctx.measureText(title).width;
+      ctx.font = `500 36px ${BODY}`;
+      const subLines = wrap(sub, 880);
+      const sw = Math.max(...subLines.map(l => ctx.measureText(l).width));
+      const bw = Math.min(CW - 100, Math.max(tw, sw) + 70), bh = 190 + subLines.length * 48;
+      const bgk = ctx.createLinearGradient(0, y - 80, 0, y - 80 + bh);
+      bgk.addColorStop(0, "rgba(3,16,28,0.78)"); bgk.addColorStop(1, "rgba(3,16,28,0.55)");
+      ctx.fillStyle = bgk; ctx.beginPath(); ctx.roundRect(x - 30, y - 80, bw, bh, 22); ctx.fill();
+      ctx.fillStyle = AMBER; ctx.fillRect(x - 30, y - 80, 8, bh);
+      ctx.font = `700 30px ${BODY}`; ctx.letterSpacing = "6px"; ctx.fillStyle = AMBER;
+      ctx.fillText(kick, x, y - 20);
+      ctx.letterSpacing = "-1px"; ctx.font = `800 76px ${DISPLAY}`; ctx.fillStyle = "#fff";
+      ctx.fillText(title, x, y + 64);
+      ctx.letterSpacing = "0px"; ctx.font = `500 36px ${BODY}`; ctx.fillStyle = SILVER;
+      subLines.forEach((l, i) => ctx.fillText(l, x, y + 122 + i * 48));
+      ctx.restore();
+    }
+  }
+
+  const facts = [
+    [16.8, 22.8, "Karadeniz hamsisi", "Engraulis encrasicolus ponticus. Sırtı mavi-yeşil, karnı ve yanları gümüş rengi."],
+    [31.0, 37.4, "Neden göç eder?", "Sonbaharda sular soğuyunca sürüler kışı geçirmek için daha ılık güneydoğu Karadeniz kıyılarına iner."],
+    [38.6, 42.6, "Asgari av boyu", "9 cm'den küçük hamsinin avlanması yasaktır."]
+  ];
+  function drawFact(t) {
+    for (const [t0, t1, title, body] of facts) {
+      if (t < t0 || t > t1) continue;
+      const a = seg(t, t0, t0 + 0.5) * (1 - seg(t, t1 - 0.4, t1));
+      const dx = -60 * (1 - seg(t, t0, t0 + 0.55));
+      ctx.save(); ctx.globalAlpha = a; ctx.textBaseline = "alphabetic";
+      const x = 60 + dx, y = 1040, w = 840;
+      ctx.font = `500 34px ${BODY}`;
+      const lines = wrap(body, w - 160);
+      const h = 110 + lines.length * 44;
+      ctx.fillStyle = "rgba(235,246,250,0.94)"; ctx.beginPath(); ctx.roundRect(x, y, w, h, 24); ctx.fill();
+      // little fish icon
+      ctx.save(); ctx.translate(x + 70, y + 62); ctx.rotate(-0.25);
+      ctx.restore();
+      drawAnchovy(x + 70, y + h / 2, 100, t * 6, a);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "#0b3550"; ctx.font = `800 40px ${DISPLAY}`;
+      ctx.fillText(title, x + 135, y + 62);
+      ctx.fillStyle = "#24495f"; ctx.font = `500 32px ${BODY}`;
+      lines.forEach((l, i) => ctx.fillText(l, x + 135, y + 108 + i * 42));
+      ctx.restore();
+    }
+  }
+
+  // route strip geometry for HUD
+  const rb = route.reduce((b, p) => ({ x0: Math.min(b.x0, p.x), x1: Math.max(b.x1, p.x), y0: Math.min(b.y0, p.y), y1: Math.max(b.y1, p.y) }), { x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9 });
+  function drawHUD(t) {
+    const a = seg(t, 11.6, 12.4) * (1 - seg(t, 47.4, 48.2));
+    if (a <= 0) return;
+    const L = at(st.s);
+    let best = seaNames[0], bd = Infinity;
+    for (const s of seaNames) { const d = Math.hypot(s.p.x - L.x, s.p.y - L.y); if (d < bd) { bd = d; best = s; } }
+    const km = st.s * KM_PER_PX, day = Math.floor(km / KM_PER_DAY) + 1;
+    ctx.save(); ctx.globalAlpha = a; ctx.textBaseline = "alphabetic";
+    const x = 60, y = 1290, w = 960, h = 240;
+    ctx.fillStyle = "rgba(3,16,28,0.9)"; ctx.beginPath(); ctx.roundRect(x, y, w, h, 24); ctx.fill();
+    ctx.strokeStyle = "rgba(160,200,220,0.18)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = `600 24px ${BODY}`; ctx.letterSpacing = "5px"; ctx.fillStyle = MUTED;
+    ctx.fillText("SÜRÜNÜN KONUMU", x + 34, y + 48);
+    ctx.letterSpacing = "0px";
+    ctx.font = `800 46px ${DISPLAY}`; ctx.fillStyle = "#fff";
+    ctx.fillText(t >= 43 ? "Tekkeköy açıkları" : best.n + " açıkları", x + 34, y + 102);
+    ctx.textAlign = "right";
+    ctx.font = `800 46px ${DISPLAY}`; ctx.fillStyle = AMBER;
+    ctx.fillText(`${day}. gün`, x + w - 34, y + 102);
+    ctx.font = `500 26px ${MONO}`; ctx.fillStyle = SILVER;
+    ctx.fillText(`${Math.round(km)} / ${Math.round(TOTAL_KM)} km`, x + w - 34, y + 48);
+    ctx.textAlign = "left";
+    // route strip
+    const sx0 = x + 150, sx1 = x + w - 150, sy0 = y + 140, sh = 70;
+    const sc = (sx1 - sx0) / (rb.x1 - rb.x0);
+    const mp = p => ({ x: sx0 + (p.x - rb.x0) * sc, y: sy0 + (p.y - rb.y0) / (rb.y1 - rb.y0) * sh });
+    ctx.strokeStyle = "rgba(255,179,71,0.3)"; ctx.lineWidth = 4; ctx.lineCap = "round";
+    ctx.beginPath(); route.forEach((p, i) => { const q = mp(p); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }); ctx.stroke();
+    ctx.strokeStyle = AMBER; ctx.lineWidth = 6;
+    ctx.beginPath();
+    for (let i = 0; i < route.length && cum[i] <= st.s; i++) { const q = mp(route[i]); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }
+    const cq = mp(L); ctx.lineTo(cq.x, cq.y); ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(cq.x, cq.y, 11, 0, 7); ctx.fill();
+    ctx.fillStyle = AMBER; ctx.beginPath(); ctx.arc(cq.x, cq.y, 5, 0, 7); ctx.fill();
+    ctx.font = `600 24px ${BODY}`; ctx.fillStyle = MUTED;
+    const st0 = mp(route[0]), en = mp(route[route.length - 1]);
+    ctx.textAlign = "left"; ctx.fillText("Tonya", st0.x + 18, st0.y + 8);
+    ctx.textAlign = "right"; ctx.fillText("Tekkeköy", en.x - 18, en.y + 8);
+    ctx.restore();
+  }
+
+  function drawEnd(t) {
+    const a = seg(t, 48.2, 49.2);
+    if (a <= 0) return;
+    ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "rgba(2,12,22,0.5)"; ctx.fillRect(0, 0, CW, CH);
+    textShadow(true);
+    const k = i => seg(t, 48.6 + i * 0.35, 49.2 + i * 0.35);
+    ctx.globalAlpha = a * k(0);
+    ctx.font = `900 150px ${DISPLAY}`; ctx.letterSpacing = "-3px";
+    const sg = ctx.createLinearGradient(0, 420, 0, 560);
+    sg.addColorStop(0, "#fff"); sg.addColorStop(1, "#9cc9db");
+    ctx.fillStyle = sg; ctx.fillText("HAMSİ", CW / 2, 560);
+    ctx.fillStyle = AMBER; ctx.fillText("GÖÇÜ", CW / 2, 700);
+    ctx.letterSpacing = "0px";
+    textShadow(false);
+    const stats = [[`~${Math.round(TOTAL_KM / 10) * 10}`, "km deniz yolu"], [`${TOTAL_DAYS}`, "günlük yolculuk"], [`${seaNames.length}`, "kıyı açığı"]];
+    stats.forEach(([v, l], i) => {
+      ctx.globalAlpha = a * k(1 + i);
+      const cx = 200 + i * 340;
+      ctx.fillStyle = "rgba(3,16,28,0.6)"; ctx.beginPath(); ctx.roundRect(cx - 150, 800, 300, 210, 24); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = `800 92px ${DISPLAY}`; ctx.fillText(v, cx, 920);
+      ctx.fillStyle = MUTED; ctx.font = `600 30px ${BODY}`; ctx.fillText(l, cx, 975);
+    });
+    ctx.globalAlpha = a * k(4);
+    ctx.fillStyle = "#fff"; ctx.font = `700 44px ${BODY}`;
+    ctx.fillText("Gırgır av sezonu: 1 Eylül – 15 Nisan", CW / 2, 1120);
+    ctx.fillStyle = SILVER; ctx.font = `500 36px ${BODY}`;
+    ctx.fillText("Tonya açıklarından Tekkeköy kıyısına", CW / 2, 1180);
+    ctx.globalAlpha = a * k(5);
+    ctx.fillStyle = MUTED; ctx.font = `500 26px ${BODY}`;
+    ctx.fillText("Temsilî canlandırmadır; rota ve süre örnek amaçlıdır.", CW / 2, 1480);
+    ctx.restore();
+  }
+
+  // ================= Frame =================
+  function render(t) {
+    drawMap(t);
+    const uw = Math.max(1 - seg(t, 4.2, 5.2), seg(t, 47.8, 48.8));
+    drawUnderwater(t, uw);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    drawTitle(t);
+    if (t > 4.5 && t < 48.2) { drawCaption(t); drawFact(t); drawHUD(t); }
+    drawEnd(t);
+    // fade in/out
+    const black = Math.max(1 - seg(t, 0, 0.6), seg(t, DUR - 0.5, DUR));
+    if (black > 0) { ctx.globalAlpha = black; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, CW, CH); ctx.globalAlpha = 1; }
+  }
+
+  let frameDone = -1;
+  function advanceTo(frame) {
+    while (frameDone < frame) {
+      frameDone++;
+      st.frameTick = frameDone;
+      if (frameDone > 0) { step(1 / (FPS * 2)); step(1 / (FPS * 2)); updateCamera(1 / FPS); }
+    }
+  }
+  window.VIDEO = { FPS, DUR, NF };
+  window.renderFrame = i => { advanceTo(i); render(i / FPS); };
+
+  if (location.hash !== "#render") {
+    let start = null;
+    const loop = now => {
+      if (start === null) start = now;
+      const f = Math.floor((now - start) / 1000 * FPS);
+      if (f >= NF) { location.reload(); return; }
+      window.renderFrame(f);
+      requestAnimationFrame(loop);
+    };
+    document.fonts.ready.then(() => requestAnimationFrame(loop));
+  }
+})();
+</script>
+</body>
+</html>
