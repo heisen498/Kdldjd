@@ -137,7 +137,7 @@ function makePerson(o) {
     const cor = sph(0.012, new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.15, roughness: 0, clearcoat: 1 }), 16, 12); cor.position.z = 0.014; cor.scale.z = 0.5; ig.add(cor);
     const hl = sph(0.0028, new THREE.MeshBasicMaterial({ color: 0xffffff }), 8, 6); hl.position.set(0.004, 0.005, 0.021); ig.add(hl);
     const lid = new THREE.Mesh(new THREE.SphereGeometry(0.0222, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), skin); eg.add(lid);
-    const lash = new THREE.Mesh(new THREE.TorusGeometry(0.021, 0.0016, 6, 24, Math.PI), lashM); lash.rotation.set(0, 0, 0); lid.add(lash); lash.rotation.x = Math.PI / 2;
+    const lash = new THREE.Mesh(new THREE.TorusGeometry(0.0215, 0.0009, 6, 24, Math.PI), lashM); lash.rotation.set(0, 0, 0); lid.add(lash); lash.rotation.x = Math.PI / 2;
     const low = new THREE.Mesh(new THREE.SphereGeometry(0.0222, 32, 16, 0, Math.PI * 2, Math.PI * 0.62, Math.PI * 0.38), skin); eg.add(low);
     P.eyes.push({ g: eg, ig }); P.lids.push(lid); P.lowLids.push(low);
   }
@@ -155,14 +155,14 @@ function makePerson(o) {
   // hair: base cap + clumps
   const hg = new THREE.Group(); head.add(hg);
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.117, 48, 32, 0, Math.PI * 2, 0, Math.PI * 0.5), hairA); top.position.y = 0.122; top.scale.set(0.97, 1.05, 1.03); top.rotation.x = -0.25; hg.add(top);
-  const nClumps = o.hairStyle === 'short' ? 26 : 70;
+  const nClumps = o.hairStyle === 'short' ? 60 : 170;
   for (let i = 0; i < nClumps; i++) {
     const u = rnd(), v = rnd() * 0.75;            // spherical coords on scalp
     const th = u * Math.PI * 2, ph = v * Math.PI * 0.5;
     const dir = new THREE.Vector3(Math.sin(ph) * Math.cos(th), Math.cos(ph), Math.sin(ph) * Math.sin(th));
     if (dir.z > 0.55 && dir.y < 0.55) continue;      // keep the face clear
-    const len = (o.hairStyle === 'short' ? 0.022 : 0.032) + rnd() * 0.022;
-    const cl = cap(0.011 + rnd() * 0.006, len, rnd() < 0.5 ? hairA : hairB, 8);
+    const len = (o.hairStyle === 'short' ? 0.016 : 0.024) + rnd() * 0.016;
+    const cl = cap(0.0065 + rnd() * 0.004, len, rnd() < 0.5 ? hairA : hairB, 6);
     cl.position.set(dir.x * 0.116, 0.122 + dir.y * 0.122, dir.z * 0.12);
     const fwd = new THREE.Vector3(0.15 * Math.sign(dir.x || 1), -0.35, 1).normalize();
     const tan = fwd.clone().sub(dir.clone().multiplyScalar(fwd.dot(dir))).normalize();
@@ -274,7 +274,7 @@ function setFace(c, kind, t, talk) {
   // lids
   const blink = Math.sin(t * 1.9 + c.blinkPh) > 0.975;
   const close = kind === 'sleep' || blink ? 1 : kind === 'determined' || kind === 'focus' ? 0.42 : kind === 'shock' ? 0.0 : kind === 'happy' || kind === 'big' ? 0.3 : 0.18;
-  P.lids.forEach(l => { l.rotation.x = -Math.PI / 2 + Math.PI * 0.5 * close; });
+  P.lids.forEach(l => { l.rotation.x = -Math.PI / 2 + Math.PI * 0.92 * close; });
   P.lowLids.forEach(l => { l.rotation.x = (kind === 'happy' || kind === 'big' ? -0.25 : 0); });
   const look = c.look || [0, 0];
   const sac = [Math.sin(t * 3.1 + c.blinkPh) > 0.9 ? 0.15 : 0, 0];
