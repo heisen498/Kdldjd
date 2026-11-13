@@ -23,8 +23,6 @@ function serve(port) {
   p.on('pageerror', e => console.error('PAGEERR', e.message));
   await p.goto(`http://localhost:${port}/s2b1.html#render`);
   await p.waitForFunction(() => window.ready, null, { timeout: 120000 });
-  // motion blur (2 sub-frames) only on the fast GPU path; MB=0 turns it off
-  if (gpu && (process.env.MB || '').trim() !== '0') await p.evaluate(() => { window.MB = true; });
   const { FPS, NF } = await p.evaluate(() => window.VIDEO);
   const grab = i => p.evaluate(i => { window.renderFrame(i); return document.getElementById('out').toDataURL('image/jpeg', 0.92); }, i);
   if (stills) {
