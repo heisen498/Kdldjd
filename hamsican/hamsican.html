@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hamsican'ın Dönüş Macerası</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  canvas { display: block; height: 100vh; max-width: 100vw; margin: 0 auto; object-fit: contain; }
+</style>
+<script src="timings.js"></script>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+(() => {
+  const CW = 1080, CH = 1920, FPS = 30, DUR = 60, NF = FPS * DUR;
+  const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  const DISP = '"Inter Display", "Inter", "DejaVu Sans", sans-serif';
+  const BODY = '"Inter", "DejaVu Sans", sans-serif';
+  const SUBS = window.SUBS || [];
+
+  // ---------- helpers ----------
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ease = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+  const seg = (t, a, b) => ease((t - a) / (b - a));
+  const lin = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const backOut = x => { x = clamp(x, 0, 1); const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+  function rr(x, y, w, h, r, fill, stroke, lw) {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 4; ctx.stroke(); }
+  }
+  function circ(x, y, r, fill) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); }
+  function txt(s, x, y, size, weight, color, align, font, ls) {
+    ctx.font = `${weight} ${size}px ${font || BODY}`; ctx.fillStyle = color; ctx.textAlign = align || "left";
+    ctx.textBaseline = "alphabetic"; ctx.letterSpacing = (ls || 0) + "px"; ctx.fillText(s, x, y); ctx.letterSpacing = "0px";
+  }
+  function outlined(s, x, y, size, weight, fill, stroke, lw, align, font) {
+    ctx.font = `${weight} ${size}px ${font || DISP}`; ctx.textAlign = align || "center"; ctx.textBaseline = "alphabetic";
+    ctx.lineJoin = "round"; ctx.lineWidth = lw; ctx.strokeStyle = stroke; ctx.strokeText(s, x, y);
+    ctx.fillStyle = fill; ctx.fillText(s, x, y);
+  }
+  function wrap(text, maxW) {
+    const words = text.split(" "), lines = []; let cur = "";
+    for (const w of words) { const n = cur ? cur + " " + w : w; if (ctx.measureText(n).width > maxW && cur) { lines.push(cur); cur = w; } else cur = n; }
+    if (cur) lines.push(cur); return lines;
+  }
+  let seed = 3; const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+  const C = {
+    skin: "#f5c9a0", skin2: "#e0a27a", hair: "#3a2619", hoodie: "#1f9e8f", hoodie2: "#178276",
+    jeans: "#3d5a99", shoe: "#f4f1ea", bag: "#f08a24", ink: "#1d2433", red: "#e63946", navy: "#1d3557",
+    cream: "#fff6e5", amber: "#ffb703"
+  };
+
+  // ---------- characters ----------
+  // o: {shirt, shirt2, pants, hair, hairColor, face, walk (phase), mode:'stand'|'walk'|'run'|'sit',
+  //     arms:'down'|'wave'|'up'|'hold'|'pull'|'pat'|'tea', facing, tilt, backpack, logo, apron, mustache, glasses, item(fn)}
+  function person(x, y, s, o, t) {
+    const f = o.facing || 1;
+    ctx.save(); ctx.translate(x, y); ctx.scale(s * f, s);
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const mode = o.mode || "stand";
+    const amp = mode === "run" ? 0.8 : mode === "walk" ? 0.42 : 0;
+    const ph = o.walk || 0;
+    const bob = amp ? Math.abs(Math.sin(ph)) * (mode === "run" ? 12 : 6) : (o.breathe ? Math.sin(t * 3) * 2 : 0);
+    const lean = mode === "run" ? 0.12 : 0;
+    ctx.rotate(lean);
+    const pants = o.pants || C.jeans, shirt = o.shirt || C.hoodie, shirt2 = o.shirt2 || C.hoodie2;
+    // legs
+    if (mode === "sit") {
+      for (const sd of [1, -1]) {
+        ctx.strokeStyle = pants; ctx.lineWidth = 32;
+        ctx.beginPath(); ctx.moveTo(sd * 6, -100); ctx.lineTo(70, -100); ctx.lineTo(70 + sd * 4, -10); ctx.stroke();
+        circ(84 + sd * 4, -8, 15, o.shoe || C.shoe);
+      }
+    } else {
+      for (const sd of [-1, 1]) {
+        const a = Math.sin(ph + (sd > 0 ? 0 : Math.PI)) * amp;
+        const hx = sd * 15, hy = -100 - bob;
+        const kx = hx + Math.sin(a) * 52, ky = hy + Math.cos(a) * 52;
+        const bend = mode === "run" ? Math.max(0, -a) * 0.9 + 0.2 : 0;
+        const fx = kx + Math.sin(a - bend) * 50, fy = ky + Math.cos(a - bend) * 50;
+        ctx.strokeStyle = pants; ctx.lineWidth = 30;
+        ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+        ctx.fillStyle = o.shoe || C.shoe; ctx.beginPath(); ctx.ellipse(fx + 10, fy + 2, 24, 13, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(0,0,0,0.15)"; ctx.fillRect(fx - 12, fy + 8, 44, 5);
+      }
+    }
+    const ty = -bob;
+    // backpack (behind)
+    if (o.backpack) { rr(-84, -212 + ty, 46, 108, 16, C.bag); rr(-80, -170 + ty, 36, 36, 10, "#d9731a"); }
+    // arm helper
+    const arm = (sx, sy, hx, hy, front) => {
+      ctx.strokeStyle = front ? shirt : shirt2; ctx.lineWidth = 25;
+      const mx = (sx + hx) / 2 + (hy < sy ? 8 : -6), my = (sy + hy) / 2 + 6;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(mx, my, hx, hy); ctx.stroke();
+      circ(hx, hy, 13, o.skin || C.skin);
+    };
+    const sw = amp ? Math.sin(ph) * amp : 0;
+    const arms = o.arms || "down";
+    let back, front;
+    const SY = -196 + ty;
+    if (arms === "wave") { back = [-50 - sw * 30, SY + 88]; front = [72 + Math.sin(t * 11) * 16, SY - 92]; }
+    else if (arms === "up") { back = [-74 + Math.sin(t * 9) * 8, SY - 100]; front = [74 + Math.sin(t * 9 + 1) * 8, SY - 104]; }
+    else if (arms === "hold") { back = [-46, SY + 86]; front = [74, SY + 44]; }
+    else if (arms === "tea") { back = [-30, SY + 70]; front = [70, SY + 30]; }
+    else if (arms === "pull") { back = [-96, SY + 70]; front = [40 + sw * 40, SY + 80]; }
+    else if (arms === "pat") { back = [-6, SY + 66]; front = [26 + Math.sin(t * 8) * 6, SY + 72]; }
+    else if (arms === "push") { back = [62, SY + 40]; front = [82, SY + 30]; }
+    else if (arms === "shrug") { back = [-80, SY - 10]; front = [80, SY - 12]; }
+    else { back = [-36 + sw * 50, SY + 88]; front = [36 - sw * 50, SY + 88]; }
+    arm(-34, SY + 6, back[0], back[1], false);
+    // torso
+    rr(-52, -216 + ty, 104, 128, 34, shirt);
+    if (o.hood) { ctx.strokeStyle = shirt2; ctx.lineWidth = 12; ctx.beginPath(); ctx.arc(0, -214 + ty, 34, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); }
+    if (o.apron) { rr(-38, -186 + ty, 76, 100, 18, "#fdfdfb"); rr(-22, -150 + ty, 44, 22, 8, "#f1d5d5"); }
+    if (o.logo) { // little silver anchovy
+      ctx.save(); ctx.translate(4, -160 + ty);
+      ctx.fillStyle = "#dfeff5"; ctx.beginPath(); ctx.ellipse(0, 0, 24, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(-34, -10); ctx.lineTo(-34, 10); ctx.fill();
+      circ(14, -2, 2.6, C.ink); ctx.restore();
+    }
+    if (o.item) { o.item(front[0], front[1]); }
+    arm(34, SY + 6, front[0], front[1], true);
+    // head
+    ctx.save();
+    ctx.translate(0, -214 + ty); ctx.rotate(o.tilt || 0); ctx.translate(0, 214 - ty);
+    const hy = -282 + ty;
+    circ(0, -218 + ty, 18, o.skin || C.skin);
+    circ(-56, hy + 4, 14, o.skin2 || C.skin2);
+    circ(0, hy, 66, o.skin || C.skin);
+    hairDraw(o.hair || "hamsi", o.hairColor || C.hair, hy, t);
+    face(o.face || "happy", hy, t, o);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function hairDraw(style, col, hy, t) {
+    ctx.fillStyle = col;
+    if (style === "hamsi") {
+      ctx.beginPath(); ctx.arc(0, hy - 6, 68, Math.PI * 1.02, Math.PI * 1.98); ctx.fill();
+      [[-46, -44, 24], [-18, -62, 26], [14, -64, 26], [42, -48, 22], [-60, -20, 18]].forEach(([dx, dy, r]) => circ(dx, hy + dy, r, col));
+      ctx.strokeStyle = col; ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(20, hy - 70); ctx.quadraticCurveTo(40, hy - 98, 22, hy - 104); ctx.stroke();
+    } else if (style === "bun") {
+      ctx.beginPath(); ctx.arc(0, hy - 4, 69, Math.PI * 0.95, Math.PI * 2.02); ctx.fill();
+      circ(-10, hy - 74, 28, col); circ(-58, hy + 10, 20, col);
+    } else if (style === "cap") {
+      circ(-56, hy + 4, 14, "#9aa0a6"); ctx.fillStyle = "#9aa0a6";
+      ctx.beginPath(); ctx.ellipse(-50, hy + 12, 14, 26, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#5b6470"; ctx.beginPath(); ctx.arc(0, hy - 14, 66, Math.PI * 1.05, Math.PI * 1.95); ctx.fill();
+      rr(10, hy - 36, 76, 16, 8, "#4a525d");
+    } else if (style === "curly") {
+      for (let a = 0; a < 9; a++) circ(Math.cos(Math.PI + a * Math.PI / 8) * 60, hy - 10 + Math.sin(Math.PI + a * Math.PI / 8) * 60, 24, col);
+    } else if (style === "long") {
+      ctx.beginPath(); ctx.arc(0, hy - 4, 70, Math.PI * 0.95, Math.PI * 2.05); ctx.fill();
+      rr(-74, hy - 10, 44, 120, 20, col);
+    } else if (style === "short") {
+      ctx.beginPath(); ctx.arc(0, hy - 8, 67, Math.PI * 1.0, Math.PI * 2.0); ctx.fill();
+      rr(-10, hy - 78, 70, 30, 14, col);
+    }
+  }
+
+  function face(kind, hy, t, o) {
+    const ex1 = -14, ex2 = 30, ey = hy - 4;
+    const blink = (Math.sin(t * 1.7 + (o.blinkPh || 0)) > 0.985);
+    // cheeks
+    ctx.fillStyle = "rgba(240,110,110,0.28)";
+    ctx.beginPath(); ctx.ellipse(-26, hy + 24, 13, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(46, hy + 24, 11, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineCap = "round";
+    const eyes = (sz, pup, dx, dy) => {
+      for (const ex of [ex1, ex2]) {
+        if (blink && kind !== "shock") { ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(ex - 9, ey); ctx.lineTo(ex + 9, ey); ctx.stroke(); continue; }
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(ex, ey, 12 * sz, 15 * sz, 0, 0, Math.PI * 2); ctx.fill();
+        circ(ex + 3 + (dx || 0), ey + 2 + (dy || 0), pup, C.ink); circ(ex + 5 + (dx || 0), ey - 2 + (dy || 0), pup * 0.3, "#fff");
+      }
+    };
+    ctx.lineWidth = 5;
+    if (kind === "sleep") {
+      for (const ex of [ex1, ex2]) { ctx.beginPath(); ctx.arc(ex, ey, 10, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke(); }
+      ctx.fillStyle = "#b5534d"; ctx.beginPath(); ctx.ellipse(10, hy + 34, 7, 5 + Math.sin(t * 2) * 2, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (kind === "bored") {
+      eyes(1, 7, 0, 4);
+      ctx.fillStyle = o.skin || C.skin; ctx.fillRect(ex1 - 14, ey - 18, 64, 14);
+      ctx.beginPath(); ctx.moveTo(ex1 - 12, ey - 4); ctx.lineTo(ex2 + 12, ey - 4); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-2, hy + 34); ctx.lineTo(24, hy + 32); ctx.stroke();
+    } else if (kind === "shock") {
+      eyes(1.15, 5);
+      ctx.beginPath(); ctx.moveTo(ex1 - 10, ey - 30); ctx.lineTo(ex1 + 8, ey - 34); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ex2 - 8, ey - 34); ctx.lineTo(ex2 + 10, ey - 30); ctx.stroke();
+      ctx.fillStyle = "#7a2b2b"; ctx.beginPath(); ctx.ellipse(10, hy + 36, 11, 15, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (kind === "sad") {
+      eyes(1, 7, 0, 3);
+      ctx.beginPath(); ctx.moveTo(ex1 - 10, ey - 22); ctx.lineTo(ex1 + 8, ey - 28); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ex2 - 8, ey - 28); ctx.lineTo(ex2 + 10, ey - 22); ctx.stroke();
+      ctx.beginPath(); ctx.arc(10, hy + 46, 16, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke();
+    } else if (kind === "annoyed") {
+      eyes(1, 7, -4, 0);
+      ctx.beginPath(); ctx.moveTo(ex1 - 10, ey - 24); ctx.lineTo(ex1 + 10, ey - 22); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ex2 - 10, ey - 30); ctx.quadraticCurveTo(ex2, ey - 40, ex2 + 12, ey - 32); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-2, hy + 36); ctx.lineTo(24, hy + 34); ctx.stroke();
+    } else if (kind === "big" || kind === "laugh") {
+      if (kind === "laugh") { for (const ex of [ex1, ex2]) { ctx.beginPath(); ctx.arc(ex, ey + 4, 10, 1.1 * Math.PI, 1.9 * Math.PI); ctx.stroke(); } }
+      else eyes(1, 7);
+      ctx.fillStyle = "#7a2b2b"; ctx.beginPath(); ctx.moveTo(-14, hy + 24); ctx.quadraticCurveTo(10, hy + 70, 36, hy + 24); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#e86a6a"; ctx.beginPath(); ctx.ellipse(11, hy + 42, 11, 6, 0, 0, Math.PI * 2); ctx.fill();
+    } else { // happy
+      eyes(1, 7);
+      ctx.beginPath(); ctx.arc(10, hy + 22, 20, 0.18 * Math.PI, 0.82 * Math.PI); ctx.stroke();
+    }
+    if (o.mustache) { ctx.fillStyle = "#4a4a4a"; ctx.beginPath(); ctx.ellipse(2, hy + 22, 20, 8, -0.1, 0, Math.PI * 2); ctx.ellipse(24, hy + 22, 18, 8, 0.1, 0, Math.PI * 2); ctx.fill(); }
+    if (o.glasses) { ctx.lineWidth = 4; ctx.strokeStyle = "#5a3e2b"; ctx.beginPath(); ctx.arc(ex1, ey, 17, 0, 7); ctx.moveTo(ex2 + 17, ey); ctx.arc(ex2, ey, 17, 0, 7); ctx.moveTo(ex1 + 17, ey); ctx.lineTo(ex2 - 17, ey); ctx.stroke(); }
+    // nose
+    ctx.strokeStyle = "rgba(150,80,60,0.6)"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(14, hy + 10, 7, -0.2 * Math.PI, 0.6 * Math.PI); ctx.stroke();
+  }
+
+  const HAMSI = { logo: true, hood: true, backpack: true, blinkPh: 0 };
+  const MOM = { shirt: "#9b5de5", shirt2: "#7d45c4", pants: "#5c4a72", hair: "bun", hairColor: "#5a3a2a", apron: true, glasses: true, shoe: "#6b4f3a", blinkPh: 1 };
+  const AMCA = { shirt: "#8d6e63", shirt2: "#6d5048", pants: "#4e4e4e", hair: "cap", mustache: true, shoe: "#3a3a3a", skin: "#eab48c", blinkPh: 2 };
+  const FRIENDS = [
+    { shirt: "#ef476f", shirt2: "#c9375a", pants: "#2b2d42", hair: "curly", hairColor: "#1b1b1b", blinkPh: 3 },
+    { shirt: "#ffd166", shirt2: "#e3b246", pants: "#3d5a99", hair: "long", hairColor: "#7a4b2a", blinkPh: 4, skin: "#f1c19a" },
+    { shirt: "#118ab2", shirt2: "#0d6e8e", pants: "#4b3f35", hair: "short", hairColor: "#2d1e14", blinkPh: 5, skin: "#d9a07a" }
+  ];
+
+  // ---------- vehicles ----------
+  function bus(x, y, s, o, t) {
+    o = o || {};
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.beginPath(); ctx.ellipse(380, 2, 400, 16, 0, 0, Math.PI * 2); ctx.fill();
+    rr(0, -310, 750, 268, 30, "#f8f8f2");
+    // windows
+    const lit = o.lit;
+    for (let i = 0; i < 7; i++) {
+      const wx = 34 + i * 84;
+      if (i === 4) continue; // door
+      rr(wx, -282, 74, 96, 10, lit ? "#ffd98a" : "#26445f");
+      if (!lit) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.moveTo(wx + 8, -276); ctx.lineTo(wx + 30, -276); ctx.lineTo(wx + 8, -240); ctx.fill(); }
+      ctx.save(); ctx.beginPath(); ctx.roundRect(wx, -282, 74, 96, 10); ctx.clip();
+      if (i === (o.hamWin ?? 2) && o.ham !== false) {
+        person(wx + 34, -110, 0.42, { ...HAMSI, backpack: false, face: o.hamFace || "happy", arms: o.hamArms || "down", facing: 1 }, t);
+      } else if ((i * 7) % 3 !== 0) {
+        circ(wx + 37, -222, 20, lit ? "rgba(90,60,30,0.55)" : "rgba(10,25,40,0.55)");
+        rr(wx + 12, -205, 50, 40, 16, lit ? "rgba(90,60,30,0.55)" : "rgba(10,25,40,0.55)");
+      }
+      ctx.restore();
+    }
+    // door
+    rr(370, -284, 70, 238, 8, o.doorOpen ? "#1b2b3a" : "#2f5574", "#cfd5da", 4);
+    // windshield
+    ctx.fillStyle = lit ? "#3b5878" : "#2c4a66";
+    ctx.beginPath(); ctx.moveTo(640, -290); ctx.lineTo(712, -290); ctx.quadraticCurveTo(748, -280, 748, -230); ctx.lineTo(748, -170); ctx.lineTo(640, -170); ctx.closePath(); ctx.fill();
+    // destination sign
+    rr(646, -306, 92, 24, 6, "#111");
+    txt("KONYA", 692, -287, 18, 800, C.amber, "center");
+    // stripes & brand
+    ctx.fillStyle = C.red; ctx.beginPath(); ctx.moveTo(0, -150); ctx.lineTo(750, -150); ctx.lineTo(750, -126); ctx.lineTo(0, -112); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = C.navy; ctx.fillRect(0, -106, 750, 10);
+    txt("HAMSİ TURİZM", 40, -158, 30, 900, C.navy, "left", DISP, 1);
+    // lights
+    circ(738, -84, 13, o.night ? "#fff7c2" : "#ffe08a"); rr(2, -98, 14, 30, 4, "#d62828");
+    if (o.night) {
+      const g = ctx.createLinearGradient(740, 0, 1150, 0);
+      g.addColorStop(0, "rgba(255,240,180,0.55)"); g.addColorStop(1, "rgba(255,240,180,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(745, -96); ctx.lineTo(1150, -150); ctx.lineTo(1150, 10); ctx.lineTo(745, -70); ctx.fill();
+    }
+    // wheels
+    for (const wx of [150, 600]) {
+      circ(wx, -40, 52, "#3a3f47");
+      circ(wx, -40, 40, "#1c1c1c"); circ(wx, -40, 22, "#c9ced3");
+      ctx.strokeStyle = "#8a9096"; ctx.lineWidth = 5;
+      for (let k = 0; k < 5; k++) { const a = (o.rot || 0) + k * Math.PI * 2 / 5; ctx.beginPath(); ctx.moveTo(wx, -40); ctx.lineTo(wx + Math.cos(a) * 20, -40 + Math.sin(a) * 20); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+
+  function car(x, y, s, col, t, o) {
+    o = o || {};
+    ctx.save(); ctx.translate(x, y); ctx.scale(s * (o.facing || 1), s);
+    ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.beginPath(); ctx.ellipse(115, 2, 120, 9, 0, 0, Math.PI * 2); ctx.fill();
+    rr(0, -100, 236, 64, 22, col);
+    rr(44, -150, 136, 60, 26, col);
+    rr(58, -140, 52, 40, 10, "#bfe3f2"); rr(118, -140, 50, 40, 10, "#bfe3f2");
+    circ(230, -70, 8, "#fff3b0"); rr(0, -80, 10, 16, 3, "#d62828");
+    for (const wx of [56, 184]) { circ(wx, -32, 26, "#1c1c1c"); circ(wx, -32, 12, "#c9ced3"); }
+    ctx.restore();
+  }
+
+  function bubble(x, y, s, text, col, t0, t) {
+    const k = backOut((t - t0) / 0.3);
+    if (k <= 0) return;
+    ctx.save(); ctx.translate(x, y); ctx.scale(k * s, k * s);
+    ctx.font = `900 46px ${DISP}`;
+    const w = ctx.measureText(text).width + 50;
+    rr(-w / 2, -50, w, 76, 34, "#fff", C.ink, 5);
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(-14, 24); ctx.lineTo(-28, 52); ctx.lineTo(8, 24); ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-14, 26); ctx.lineTo(-28, 52); ctx.lineTo(8, 26); ctx.stroke();
+    txt(text, 0, 4, 46, 900, col || C.ink, "center", DISP);
+    ctx.restore();
+  }
+
+  function speedLines(x, y, n, t, col) {
+    ctx.strokeStyle = col || "rgba(255,255,255,0.8)"; ctx.lineWidth = 6; ctx.lineCap = "round";
+    for (let i = 0; i < n; i++) {
+      const yy = y - 40 - i * 55, l = 50 + ((i * 37) % 40), ox = ((t * 900 + i * 70) % 60);
+      ctx.beginPath(); ctx.moveTo(x - 30 - ox, yy); ctx.lineTo(x - 30 - ox - l, yy); ctx.stroke();
+    }
+  }
+
+  // ---------- environment ----------
+  function sky(c1, c2) { const g = ctx.createLinearGradient(0, 0, 0, CH); g.addColorStop(0, c1); g.addColorStop(0.62, c2); ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH); }
+  function hills(off, base, amp, col, freq, ph) {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, CH);
+    for (let x = 0; x <= CW; x += 20) ctx.lineTo(x, base - amp * (0.6 + 0.4 * Math.sin((x + off) * freq + ph)) - amp * 0.35 * Math.sin((x + off) * freq * 2.7 + ph * 2));
+    ctx.lineTo(CW, CH); ctx.closePath(); ctx.fill();
+  }
+  function road(y, off, night) {
+    ctx.fillStyle = night ? "#2d3138" : "#565c66"; ctx.fillRect(0, y - 20, CW, 210);
+    ctx.fillStyle = night ? "#4a4f57" : "#8a9099"; ctx.fillRect(0, y - 26, CW, 8);
+    ctx.fillStyle = night ? "#cfcfa0" : "#f2f2e6";
+    for (let x = -((off % 160) + 160); x < CW + 160; x += 160) ctx.fillRect(x, y + 80, 80, 10);
+    ctx.fillStyle = night ? "#1a2a1c" : "#7cbf62"; ctx.fillRect(0, y + 190, CW, CH);
+  }
+  function cloud(x, y, s, a) {
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    [[0, 0, 50], [45, -18, 58], [95, 0, 46], [45, 12, 50]].forEach(([dx, dy, r]) => { ctx.beginPath(); ctx.arc(x + dx * s, y + dy * s, r * s, 0, 7); ctx.fill(); });
+  }
+  function hwSign(x, y, lines, col) {
+    ctx.fillStyle = "#8a8f96"; ctx.fillRect(x + 20, y - 10, 12, 260); ctx.fillRect(x + 230, y - 10, 12, 260);
+    rr(x - 10, y - 120, 290, 130, 12, col || "#1f7a3e", "#fff", 5);
+    lines.forEach((l, i) => txt(l, x + 135, y - 70 + i * 50, i === 0 ? 40 : 34, 800, "#fff", "center", BODY));
+  }
+
+  // Istanbul silhouette
+  function istanbul(off, base, col) {
+    ctx.fillStyle = col;
+    const X = x => x - off;
+    for (let i = 0; i < 16; i++) { const bx = X(i * 90 - 60), h = 80 + ((i * 53) % 90); ctx.fillRect(bx, base - h, 70, h); }
+    // mosque
+    const mx = X(380);
+    ctx.beginPath(); ctx.arc(mx, base - 150, 95, Math.PI, 0); ctx.fill();
+    ctx.fillRect(mx - 150, base - 150, 300, 150);
+    ctx.beginPath(); ctx.arc(mx - 110, base - 150, 45, Math.PI, 0); ctx.arc(mx + 110, base - 150, 45, Math.PI, 0); ctx.fill();
+    for (const dx of [-190, -150, 150, 190]) { ctx.fillRect(mx + dx - 6, base - 360, 12, 360); ctx.beginPath(); ctx.moveTo(mx + dx - 9, base - 360); ctx.lineTo(mx + dx, base - 410); ctx.lineTo(mx + dx + 9, base - 360); ctx.fill(); }
+    // Galata-like tower
+    const gx = X(820);
+    ctx.fillRect(gx - 30, base - 280, 60, 280); ctx.beginPath(); ctx.moveTo(gx - 40, base - 280); ctx.lineTo(gx, base - 360); ctx.lineTo(gx + 40, base - 280); ctx.fill();
+  }
+
+  // ---------- map (lon/lat) ----------
+  const MAP = { lon0: 26.4, lat1: 42.15, k: Math.cos(39.6 * Math.PI / 180), sc: 192, ox: 60, oy: 560 };
+  const MP = (lon, lat) => ({ x: MAP.ox + (lon - MAP.lon0) * MAP.k * MAP.sc, y: MAP.oy + (MAP.lat1 - lat) * MAP.sc });
+  const marmara = [[26.68,40.48],[26.95,40.62],[27.5,40.96],[28.0,41.0],[28.6,40.97],[29.0,41.0],[29.15,40.9],[29.4,40.78],[29.95,40.76],[29.45,40.7],[29.05,40.45],[28.6,40.38],[27.9,40.38],[27.3,40.4],[26.95,40.32]];
+  const blackSea = [[27.55,42.6],[27.98,41.88],[28.09,41.63],[28.68,41.35],[29.1,41.23],[29.6,41.18],[30.15,41.14],[30.65,41.12],[31.12,41.09],[31.42,41.28],[31.8,41.45],[32.33,41.68],[33.2,41.95],[33.2,42.6]];
+  const aegean = [[26.4,40.95],[26.65,40.62],[26.25,40.05],[26.4,39.6],[26.4,42.6]];
+  const routeLL = [[27.80,41.16],[28.25,41.07],[28.97,41.02],[29.1,40.99],[29.43,40.80],[29.92,40.77],[30.40,40.74],[30.2,40.45],[29.98,40.14],[30.04,39.91],[30.52,39.78],[30.6,39.3],[30.54,38.76],[31.42,38.36],[31.91,38.28],[32.49,37.87]];
+  const routePts = routeLL.map(([a, b]) => MP(a, b));
+  const rcum = [0]; for (let i = 1; i < routePts.length; i++) rcum.push(rcum[i - 1] + Math.hypot(routePts[i].x - routePts[i - 1].x, routePts[i].y - routePts[i - 1].y));
+  const RLEN = rcum[rcum.length - 1];
+  function rAt(f) {
+    const s = clamp(f, 0, 1) * RLEN; let i = 1; while (i < rcum.length - 1 && rcum[i] < s) i++;
+    const a = routePts[i - 1], b = routePts[i], k = (s - rcum[i - 1]) / (rcum[i] - rcum[i - 1] || 1);
+    return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k) };
+  }
+  const fracOf = idx => rcum[idx] / RLEN;
+  const mapTowns = [["Çorlu", 0, -1], ["İstanbul", 2, -1], ["İzmit", 5, -1], ["Sakarya", 6, 1], ["Bilecik", 8, 1], ["Bozüyük", 9, -1], ["Eskişehir", 10, 1], ["Afyon", 12, 1], ["Konya", 15, -1]];
+
+  function drawMap(t, busF, revealF) {
+    sky("#f3e7cf", "#efdcb8");
+    const poly = (pts, col) => { ctx.fillStyle = col; ctx.beginPath(); pts.forEach(([a, b], i) => { const p = MP(a, b); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.closePath(); ctx.fill(); };
+    ctx.fillStyle = "#7cc6e0"; ctx.fillRect(0, 0, CW, MAP.oy - 10);
+    poly(blackSea, "#7cc6e0"); poly(marmara, "#7cc6e0"); poly(aegean, "#7cc6e0");
+    const bs1 = MP(29.0, 41.02), bs2 = MP(29.12, 41.22);
+    ctx.strokeStyle = "#7cc6e0"; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(bs1.x, bs1.y); ctx.lineTo(bs2.x, bs2.y); ctx.stroke();
+    txt("KARADENİZ", MP(30.6, 41.9).x, MP(30.6, 41.9).y, 34, 800, "rgba(20,70,100,0.55)", "center", DISP, 8);
+    txt("Marmara", MP(28.2, 40.66).x, MP(28.2, 40.66).y, 26, 700, "rgba(20,70,100,0.55)", "center", BODY, 2);
+    // route
+    ctx.setLineDash([16, 14]); ctx.strokeStyle = "rgba(29,53,87,0.35)"; ctx.lineWidth = 8;
+    ctx.beginPath(); routePts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = C.red; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(routePts[0].x, routePts[0].y);
+    for (let i = 1; i < routePts.length && rcum[i] <= revealF * RLEN; i++) ctx.lineTo(routePts[i].x, routePts[i].y);
+    const e = rAt(revealF); ctx.lineTo(e.x, e.y); ctx.stroke();
+    for (const [n, idx, side] of mapTowns) {
+      const p = routePts[idx], on = fracOf(idx) <= revealF + 0.001, big = n === "Çorlu" || n === "Konya";
+      circ(p.x, p.y, big ? 16 : 11, on ? C.red : "#9a8f7a"); circ(p.x, p.y, big ? 7 : 5, "#fff");
+      ctx.globalAlpha = on || big ? 1 : 0.5;
+      ctx.lineWidth = 8; ctx.strokeStyle = "#fff8ec"; ctx.font = `${big ? 900 : 700} ${big ? 40 : 30}px ${BODY}`; ctx.textAlign = side > 0 ? "left" : "right";
+      const lx = p.x + side * 24, ly = p.y + 10;
+      ctx.strokeText(n, lx, ly); ctx.fillStyle = C.ink; ctx.fillText(n, lx, ly);
+      ctx.globalAlpha = 1;
+    }
+    // bus icon
+    const b = rAt(busF);
+    ctx.save(); ctx.translate(b.x, b.y - 34); ctx.scale(0.13, 0.13); bus(-375, 140, 1, { ham: false, rot: t * 10 }, t); ctx.restore();
+  }
+
+  // ---------- scenes ----------
+  function sceneTitle(t) {
+    sky("#7fd1f0", "#cdeefa");
+    cloud(120 + t * 20, 360, 1, 0.9); cloud(700 - t * 15, 520, 0.8, 0.8);
+    hills(t * 20, 1250, 160, "#9bd17a", 0.004, 1); hills(t * 40, 1330, 90, "#7cbf62", 0.006, 3);
+    road(1450, t * 200);
+    bus(-240 + seg(t, 0, 4) * 60, 1480, 0.8, { rot: t * 6, hamWin: 3, hamArms: "wave", hamFace: "big" }, t);
+    const k1 = backOut((t - 0.3) / 0.6), k2 = backOut((t - 0.7) / 0.6), k3 = seg(t, 1.2, 1.8);
+    ctx.save(); ctx.translate(CW / 2, 600); ctx.scale(k1, k1); ctx.rotate(-0.04);
+    outlined("HAMSİCAN'IN", 0, 0, 104, 900, "#fff", C.navy, 22); ctx.restore();
+    ctx.save(); ctx.translate(CW / 2, 760); ctx.scale(k2, k2); ctx.rotate(-0.04);
+    outlined("DÖNÜŞ MACERASI", 0, 0, 96, 900, C.amber, C.navy, 22); ctx.restore();
+    ctx.globalAlpha = k3;
+    rr(CW / 2 - 250, 830, 500, 80, 40, C.navy);
+    txt("Çorlu  →  Konya", CW / 2, 886, 46, 800, "#fff", "center", BODY);
+    ctx.globalAlpha = 1;
+  }
+
+  function sceneHome(t) { // global 4..14
+    const lt = t - 4;
+    ctx.fillStyle = "#f6dfbf"; ctx.fillRect(0, 0, CW, CH);
+    ctx.fillStyle = "#efd2ab"; for (let x = 0; x < CW; x += 90) ctx.fillRect(x, 0, 45, 1240);
+    // window
+    rr(90, 470, 330, 300, 14, "#a8dcf2", "#8a5a3b", 14);
+    cloud(150 + lt * 6, 560, 0.55, 0.9);
+    ctx.fillStyle = "#8fc96c"; ctx.fillRect(97, 690, 316, 73);
+    ctx.fillStyle = "#c9584f"; ctx.fillRect(150, 640, 60, 50); ctx.fillRect(270, 655, 70, 35);
+    ctx.fillStyle = "#8a5a3b"; ctx.fillRect(250, 470, 10, 300); ctx.fillRect(90, 615, 330, 10);
+    ctx.fillStyle = "#e76f51"; ctx.fillRect(60, 450, 50, 340); ctx.fillRect(400, 450, 50, 340);
+    // frame "ÇORLU"
+    rr(640, 500, 280, 180, 10, "#fff", "#8a5a3b", 12);
+    txt("Evim", 780, 575, 44, 900, C.red, "center", DISP);
+    txt("Çorlu ❤", 780, 630, 36, 700, C.ink, "center", BODY);
+    // floor
+    ctx.fillStyle = "#c98d5a"; ctx.fillRect(0, 1240, CW, CH);
+    ctx.strokeStyle = "#b07a4b"; ctx.lineWidth = 4; for (let y = 1290; y < CH; y += 70) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke(); }
+    // table
+    rr(500, 1080, 330, 26, 8, "#8a5a3b"); ctx.fillStyle = "#7a4d30"; ctx.fillRect(520, 1100, 22, 150); ctx.fillRect(790, 1100, 22, 150);
+    // bag on table
+    const n = clamp(Math.floor((lt - 1.4) / 0.85) + 1, 0, 6);
+    const stuffing = lt > 5 && lt < 9;
+    const wob = stuffing ? Math.sin(lt * 26) * 0.04 : 0;
+    const bulge = 1 + n * 0.05 + (lt > 7.3 && lt < 8.6 ? 0.08 * Math.abs(Math.sin(lt * 18)) : 0);
+    ctx.save(); ctx.translate(665, 1080); ctx.rotate(wob); ctx.scale(bulge, bulge);
+    rr(-120, -150, 240, 150, 40, C.bag); rr(-120, -150, 240, 34, 20, "#d9731a");
+    ctx.strokeStyle = "#8a4b10"; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(0, -150, 60, Math.PI, 0); ctx.stroke();
+    // packages peeking out
+    for (let i = 0; i < Math.min(n, 4); i++) rr(-90 + i * 46, -186 + (i % 2) * 10, 60, 44, 6, "#fffaf0", "#c9a77c", 3);
+    ctx.restore();
+    // flying packages
+    for (let i = 0; i < 6; i++) {
+      const t0 = 1.0 + i * 0.85, k = (lt - t0) / 0.5;
+      if (k < 0 || k > 1) continue;
+      const px = lerp(880, 665, k), py = lerp(960, 960, k) - Math.sin(k * Math.PI) * 160;
+      ctx.save(); ctx.translate(px, py); ctx.rotate(k * 6);
+      rr(-40, -28, 80, 56, 6, "#fffaf0", "#c9a77c", 3); txt("KÖFTE", 0, 8, 18, 900, C.red, "center"); ctx.restore();
+    }
+    // popping package
+    if (lt > 8.4) {
+      const k = clamp((lt - 8.4) / 1.4, 0, 1);
+      ctx.save(); ctx.translate(665 - k * 160, 920 - Math.sin(k * Math.PI) * 300 + k * 240); ctx.rotate(-k * 9);
+      rr(-40, -28, 80, 56, 6, "#fffaf0", "#c9a77c", 3); txt("KÖFTE", 0, 8, 18, 900, C.red, "center"); ctx.restore();
+    }
+    // mom
+    const momArms = lt > 1 && lt < 6.2 ? "hold" : "down";
+    person(930, 1250, 1.05, { ...MOM, facing: -1, arms: momArms, face: lt > 8.3 ? "shock" : "happy", breathe: true,
+      item: momArms === "hold" ? (hx, hy) => { rr(hx - 34, hy - 50, 68, 48, 6, "#fffaf0", "#c9a77c", 3); } : null }, t);
+    // Hamsican
+    const hmFace = lt < 4.6 ? "big" : lt < 8.3 ? "happy" : lt < 9.4 ? "shock" : "laugh";
+    const hmArms = lt < 3.8 ? "wave" : lt > 7.2 && lt < 8.6 ? "push" : "down";
+    person(300 + seg(lt, 6.6, 7.2) * 120, 1250, 1.05, { ...HAMSI, face: hmFace, arms: hmArms, breathe: true }, t);
+    if (lt > 8.3 && lt < 9.8) bubble(470, 780, 1, "!!", C.red, 4 + 8.3, t);
+  }
+
+  function sceneOtogar(t) { // 14..18.4
+    const lt = t - 14;
+    sky("#86cff0", "#d6f1fb");
+    cloud(700, 300, 0.9, 0.85);
+    // terminal
+    rr(-40, 520, 1160, 560, 0, "#e9edf1");
+    ctx.fillStyle = "#1d6fb8"; ctx.fillRect(-40, 520, 1160, 120);
+    txt("ÇORLU OTOGARI", CW / 2, 605, 64, 900, "#fff", "center", DISP, 4);
+    for (let i = 0; i < 6; i++) rr(20 + i * 180, 700, 140, 220, 8, "#9fc3dd", "#c8d4dd", 6);
+    rr(760, 950, 200, 80, 10, "#ffb703"); txt("PERON 7", 860, 1004, 36, 900, C.ink, "center");
+    ctx.fillStyle = "#b9bec4"; ctx.fillRect(0, 1080, CW, CH); ctx.fillStyle = "#9ea4ab"; ctx.fillRect(0, 1080, CW, 16);
+    // bus moving
+    const mv = lt < 1.2 ? 0 : lt < 2.8 ? (lt - 1.2) * (lt - 1.2) * 18 : 46 + (lt - 2.8) * 70 + Math.pow(Math.max(0, lt - 3.0), 2) * 520;
+    const bx = 300 + mv, s = 0.95;
+    bus(bx, 1320, s, { rot: mv / 40, doorOpen: lt < 2.9, ham: lt > 3.0, hamWin: 5, hamFace: "laugh" }, t);
+    if (lt < 1.8) bubble(bx + 740 * s, 960, 1, "DIIIT!", C.red, 14.25, t);
+    // Hamsican running with suitcase
+    if (lt < 2.95) {
+      const door = bx + 405 * s;
+      const hx = lerp(-140, door, seg(lt, 0.1, 2.85));
+      const sx = hx - 150;
+      rr(sx - 50, 1210, 100, 120, 14, "#ef476f"); ctx.fillStyle = "#c9375a"; ctx.fillRect(sx - 50, 1250, 100, 12);
+      circ(sx - 30, 1335, 10, "#333"); circ(sx + 30, 1335, 10, "#333");
+      ctx.strokeStyle = "#555"; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(sx + 30, 1210); ctx.lineTo(hx - 80, 1150); ctx.stroke();
+      person(hx, 1330, 1.0, { ...HAMSI, mode: "run", walk: lt * 16, arms: "pull", face: "shock" }, t);
+      speedLines(hx - 60, 1250, 4, t);
+    }
+  }
+
+  function sceneTraffic(t) { // 18.4..23.4
+    const lt = t - 18.4;
+    sky("#9ccfe8", "#f6d9b8");
+    ctx.fillStyle = "#e7b08a"; circ(880, 420, 70, "#ffd27a");
+    istanbul(lt * 4, 1010, "rgba(70,80,105,0.55)");
+    ctx.fillStyle = "#6d737c"; ctx.fillRect(0, 1000, CW, CH);
+    road(1060, 0);
+    ctx.fillStyle = "#565c66"; ctx.fillRect(0, 1240, CW, 220);
+    ctx.fillStyle = "#f2f2e6"; for (let x = 0; x < CW; x += 160) ctx.fillRect(x, 1250, 80, 10);
+    ctx.fillStyle = "#7cbf62"; ctx.fillRect(0, 1460, CW, CH);
+    // back lane cars + bus
+    const jit = k => Math.sin(t * 2 + k) * 3;
+    car(-150 + jit(1), 1160, 0.85, "#ffd166", t);
+    bus(150 + jit(2), 1170, 0.82, { rot: 0, hamWin: 3, hamFace: "bored" }, t);
+    car(830 + jit(3), 1160, 0.85, "#06d6a0", t);
+    // front lane
+    const cols = ["#ef476f", "#118ab2", "#8338ec", "#ff9f1c", "#2a9d8f"];
+    for (let i = 0; i < 6; i++) car(-120 + i * 245 + jit(i + 5), 1400, 0.9, cols[i % 5], t);
+    bubble(160, 1210, 0.8, "DIT!", C.red, 18.4 + 1.0, t);
+    if (lt > 1.0 && lt < 2.2) {}
+    bubble(900, 1200, 0.8, "DIT DIT!", C.red, 18.4 + 2.1, t);
+    // clock
+    const ck = backOut((lt - 0.6) / 0.4);
+    if (ck > 0) {
+      ctx.save(); ctx.translate(540, 640); ctx.scale(ck, ck);
+      circ(0, 0, 120, "#fff"); ctx.strokeStyle = C.ink; ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(0, 0, 120, 0, 7); ctx.stroke();
+      for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 95, Math.sin(a) * 95); ctx.lineTo(Math.cos(a) * 108, Math.sin(a) * 108); ctx.stroke(); }
+      const a = -Math.PI / 2 + Math.max(0, lt - 0.8) * 5.5;
+      ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * 80, Math.sin(a) * 80); ctx.stroke();
+      ctx.lineWidth = 12; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a / 12 - 0.4) * 52, Math.sin(a / 12 - 0.4) * 52); ctx.stroke();
+      circ(0, 0, 10, C.red);
+      ctx.restore();
+      if (lt > 2.4) { const k = backOut((lt - 2.4) / 0.4); ctx.save(); ctx.translate(540, 830); ctx.scale(k, k); outlined("+1 SAAT", 0, 0, 72, 900, C.amber, C.navy, 16); ctx.restore(); }
+    }
+  }
+
+  function sceneMap(t) { // 23.4..28.8
+    const lt = t - 23.4;
+    const f0 = fracOf(2), f1 = fracOf(9);
+    const reveal = lerp(f0, f1, seg(lt, 0.4, 4.6));
+    drawMap(t, reveal, reveal);
+    rr(60, 400, 960, 110, 30, C.navy);
+    txt("ROTA: Çorlu → Konya", CW / 2, 474, 54, 900, "#fff", "center", DISP);
+  }
+
+  function sceneMola(t) { // 28.8..34
+    const lt = t - 28.8;
+    sky("#8dd0ee", "#e6f6fb");
+    cloud(200, 330, 0.9, 0.9);
+    hills(0, 900, 120, "#a9d38c", 0.005, 2);
+    // building
+    rr(40, 640, 640, 460, 0, "#f4efe6");
+    rr(20, 600, 680, 90, 10, C.red);
+    txt("BOZÜYÜK MOLA TESİSLERİ", 360, 662, 40, 900, "#fff", "center", DISP, 1);
+    rr(90, 750, 220, 200, 10, "#a6d4ec", "#c4b7a2", 6); rr(360, 750, 240, 350, 10, "#8b5e3c");
+    rr(390, 790, 180, 70, 8, "#fff"); txt("ÇAY · TOST", 480, 838, 30, 900, C.red, "center");
+    ctx.fillStyle = "#c2c7cc"; ctx.fillRect(0, 1100, CW, CH); ctx.fillStyle = "#a9aeb4"; ctx.fillRect(0, 1100, CW, 14);
+    // small table
+    rr(140, 1150, 170, 16, 6, "#8a5a3b"); ctx.fillStyle = "#7a4d30"; ctx.fillRect(218, 1160, 14, 120);
+    // bus leaving
+    const mv = lt < 1.8 ? 0 : lt < 4.0 ? Math.pow(lt - 1.8, 2) * 120 : 580;
+    bus(470 + mv, 1350, 0.82, { rot: mv / 40, ham: false, doorOpen: lt > 4.6 }, t);
+    // Hamsican
+    const run = lt > 2.6 && lt < 4.9;
+    const hx = run ? lerp(330, 760, seg(lt, 2.6, 4.9)) : lt >= 4.9 ? 760 : 330;
+    const fce = lt < 1.9 ? "happy" : lt < 4.9 ? "shock" : "laugh";
+    if (lt < 2.6 || lt > 4.9) {
+      // tost on table (bitten after 1.0s)
+      if (lt < 2.6) { rr(180, 1118, 90, 34, 8, "#e0a458"); if (lt > 1.0) circ(268, 1130, 16, "#c2c7cc"); }
+    }
+    person(hx, 1350, 1.0, { ...HAMSI, mode: run ? "run" : "stand", walk: lt * 16, arms: run ? "tea" : "tea", face: fce, breathe: true,
+      item: (x, y) => { // tulip tea glass on saucer
+        ctx.fillStyle = "#e5e5e5"; ctx.beginPath(); ctx.ellipse(x, y + 12, 30, 7, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "rgba(200,40,20,0.9)"; ctx.beginPath(); ctx.moveTo(x - 16, y - 40); ctx.quadraticCurveTo(x - 6, y - 14, x - 14, y + 8); ctx.lineTo(x + 14, y + 8); ctx.quadraticCurveTo(x + 6, y - 14, x + 16, y - 40); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 3; ctx.stroke();
+      } }, t);
+    if (run) for (let i = 0; i < 4; i++) { const k = ((lt * 3 + i * 0.25) % 1); circ(hx + 60 - k * 140, 1150 - 100 + k * 160 - Math.sin(k * 3) * 40, 7, "rgba(200,40,20,0.85)"); }
+    if (lt > 1.9 && lt < 3.4) bubble(hx + 60, 880, 1, "OTOBÜS!", C.red, 28.8 + 1.9, t);
+    if (lt > 2.6 && lt < 4.9) speedLines(hx - 50, 1270, 4, t);
+  }
+
+  const stars = Array.from({ length: 120 }, () => ({ x: rnd() * CW, y: rnd() * 1000, r: 1 + rnd() * 2.5, ph: rnd() * 6 }));
+  function sceneNight(t) { // 34..37.2
+    const lt = t - 34;
+    sky("#0b1533", "#2a3a6b");
+    for (const s of stars) circ(s.x, s.y, s.r, `rgba(255,255,230,${0.5 + 0.5 * Math.sin(t * 3 + s.ph)})`);
+    circ(840, 300, 70, "#fff6d5"); circ(870, 285, 62, "#0f1a3d");
+    const off = lt * 900;
+    hills(off * 0.15, 1100, 140, "#1a2a4a", 0.004, 1);
+    for (let i = 0; i < 20; i++) { const x = ((i * 160 - off * 0.3) % 1300 + 1300) % 1300 - 100; circ(x, 1040 + (i % 3) * 12, 4, "rgba(255,220,140,0.9)"); }
+    hills(off * 0.4, 1200, 70, "#14223a", 0.007, 4);
+    road(1290, off, true);
+    // signs
+    const sx1 = 1200 - (lt - 0.0) * 900, sx2 = 1200 - (lt - 1.6) * 900;
+    if (sx1 > -320 && sx1 < 1200) hwSign(sx1, 1050, ["ESKİŞEHİR", "12 km"]);
+    if (sx2 > -320 && sx2 < 1200) hwSign(sx2, 1050, ["AFYONKARAHİSAR", "← Konya 228 km"]);
+    bus(140, 1330, 0.85, { rot: lt * 22, lit: true, night: true, ham: false }, t);
+  }
+
+  function sceneWindow(t) { // 37.2..40.2
+    const lt = t - 37.2;
+    ctx.fillStyle = "#3a4a63"; ctx.fillRect(0, 0, CW, CH);
+    // window to outside
+    rr(80, 470, 920, 420, 40, "#0d1838", "#cfd5da", 18);
+    ctx.save(); ctx.beginPath(); ctx.roundRect(89, 479, 902, 402, 32); ctx.clip();
+    for (const s of stars) circ(s.x, s.y * 0.5 + 430, s.r, "rgba(255,255,230,0.8)");
+    for (let i = 0; i < 6; i++) { const x = ((i * 260 - lt * 1400) % 1560 + 1560) % 1560 - 200; ctx.strokeStyle = "rgba(255,210,120,0.8)"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x, 800 + i * 8); ctx.lineTo(x + 120, 800 + i * 8); ctx.stroke(); }
+    ctx.restore();
+    // seats
+    rr(70, 820, 450, 900, 50, "#a33a3a"); rr(560, 820, 450, 900, 50, "#a33a3a");
+    rr(90, 820, 410, 90, 30, "#c24b4b"); rr(580, 820, 410, 90, 30, "#c24b4b");
+    // amca (right) and Hamsican (left) leaning
+    const lean = 0.55 * seg(lt, 0.2, 1.0);
+    person(720, 1420, 1.5, { ...AMCA, mode: "sit", facing: -1, face: lt > 1.2 ? "annoyed" : "happy", arms: "down" }, t);
+    person(360 + lean * 150, 1420, 1.5, { ...HAMSI, backpack: false, mode: "sit", facing: 1, face: "sleep", tilt: lean, arms: "down" }, t);
+    // Zzz
+    for (let i = 0; i < 3; i++) {
+      const k = ((lt * 0.7 + i / 3) % 1);
+      ctx.globalAlpha = 1 - k;
+      outlined("Z", 500 + k * 120 + i * 10, 880 - k * 260, 50 + i * 16, 900, "#fff", C.navy, 10);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function sceneKonya(t) { // 40.2..44.8
+    const lt = t - 40.2;
+    sky("#ffb88a", "#ffe8c2");
+    circ(860, 820, 110, "#fff1b8"); circ(860, 820, 150, "rgba(255,241,184,0.35)");
+    // skyline: Mevlana green dome + mosque
+    const base = 1040;
+    ctx.fillStyle = "#c98b6b";
+    for (let i = 0; i < 12; i++) { const bx = i * 100 - 30, h = 40 + ((i * 41) % 60); ctx.fillRect(bx, base - h, 80, h); }
+    // mosque (Selimiye-like)
+    ctx.fillStyle = "#b47457"; ctx.beginPath(); ctx.arc(330, base - 110, 70, Math.PI, 0); ctx.fill(); ctx.fillRect(220, base - 110, 220, 110);
+    ctx.fillRect(196, base - 300, 12, 300); ctx.fillRect(452, base - 300, 12, 300);
+    ctx.beginPath(); ctx.moveTo(192, base - 300); ctx.lineTo(202, base - 340); ctx.lineTo(212, base - 300); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(448, base - 300); ctx.lineTo(458, base - 340); ctx.lineTo(468, base - 300); ctx.fill();
+    // green fluted conical dome on a drum
+    const gx = 600;
+    rr(gx - 40, base - 200, 80, 200, 6, "#2bb39a");
+    ctx.strokeStyle = "#1f8e79"; ctx.lineWidth = 5; for (let k = -30; k <= 30; k += 15) { ctx.beginPath(); ctx.moveTo(gx + k, base - 200); ctx.lineTo(gx + k, base); ctx.stroke(); }
+    ctx.fillStyle = "#38c7ab"; ctx.beginPath(); ctx.moveTo(gx - 48, base - 200); ctx.lineTo(gx, base - 330); ctx.lineTo(gx + 48, base - 200); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#1f8e79"; ctx.lineWidth = 4; for (let k = -36; k <= 36; k += 18) { ctx.beginPath(); ctx.moveTo(gx + k, base - 200); ctx.lineTo(gx, base - 330); ctx.stroke(); }
+    ctx.strokeStyle = "#e9c46a"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(gx, base - 330); ctx.lineTo(gx, base - 370); ctx.stroke();
+    ctx.fillStyle = "#b47457"; ctx.beginPath(); ctx.arc(gx + 110, base - 60, 40, Math.PI, 0); ctx.arc(gx - 110, base - 60, 36, Math.PI, 0); ctx.fill(); ctx.fillRect(gx - 150, base - 60, 300, 60);
+    // plain
+    ctx.fillStyle = "#e9c46a"; ctx.fillRect(0, base, CW, CH);
+    ctx.fillStyle = "#d9ae4f"; for (let y = base + 30; y < 1300; y += 50) ctx.fillRect(0, y, CW, 14);
+    road(1360, lt * 500);
+    // sign
+    hwSign(760, 1240, ["KONYA", "Hoş geldiniz"], "#1d6fb8");
+    // bus arrives
+    const bx = lerp(-720, 140, 1 - Math.pow(1 - seg(lt, 0, 3.4), 2));
+    bus(bx, 1400, 0.8, { rot: bx / 30, hamWin: 3, hamArms: "wave", hamFace: "big" }, t);
+  }
+
+  function sceneYurt(t) { // 44.8..53.2
+    const lt = t - 44.8;
+    if (t < 50.6) {
+      sky("#88d0f0", "#d8f2fb");
+      cloud(150, 330, 0.8, 0.85); cloud(760, 420, 0.7, 0.8);
+      // building
+      ctx.fillStyle = "#c86b4f"; ctx.fillRect(340, 520, 760, 800);
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) rr(380 + c * 175, 640 + r * 150, 110, 100, 8, "#bfe3f2", "#f4efe6", 6);
+      rr(320, 470, 800, 90, 10, C.navy); txt("ÖĞRENCİ YURDU", 720, 534, 48, 900, "#fff", "center", DISP, 3);
+      ctx.fillStyle = "#b0b5bb"; ctx.fillRect(0, 1320, CW, CH); ctx.fillStyle = "#98a0a8"; ctx.fillRect(0, 1320, CW, 14);
+      ctx.fillStyle = "#7cbf62"; ctx.fillRect(0, 1260, 340, 60);
+      // friends
+      const rush = seg(lt, 2.7, 3.6);
+      const fx = [620, 790, 960].map((x, i) => lerp(x, 410 + i * 70, rush));
+      const fArms = lt < 2.7 ? "up" : lt < 3.6 ? "up" : "hold";
+      // Hamsican walks in
+      const hx = lerp(-160, 260, seg(lt, 0, 2.2));
+      const hasBag = lt < 3.4;
+      person(hx, 1330, 1.0, { ...HAMSI, mode: lt < 2.2 ? "walk" : "stand", walk: lt * 9, arms: hasBag ? "hold" : "shrug",
+        face: lt < 3.4 ? "big" : "sad", breathe: true,
+        item: hasBag ? (x, y) => { rr(x - 50, y - 20, 100, 80, 14, "#fff", "#c9a77c", 3); txt("KÖFTE", x, y + 30, 24, 900, C.red, "center"); } : null }, t);
+      FRIENDS.forEach((fo, i) => person(fx[i], 1330, 1.0, { ...fo, facing: -1, mode: lt > 2.7 && lt < 3.6 ? "run" : "stand", walk: lt * 16 + i, arms: fArms, face: "big", breathe: true }, t));
+      if (lt >= 3.4) {
+        // bag held up by friends
+        const k = seg(lt, 3.4, 3.9);
+        ctx.save(); ctx.translate(fx[1] - 20, lerp(1180, 870, k)); ctx.rotate(Math.sin(t * 6) * 0.1);
+        rr(-60, -40, 120, 90, 16, "#fff", "#c9a77c", 3); txt("KÖFTE", 0, 18, 28, 900, C.red, "center"); ctx.restore();
+        bubble(fx[1] - 20, 720, 0.95, "KÖFTELER!", C.red, 44.8 + 3.6, t);
+      }
+      if (lt > 3.9) bubble(hx + 20, 860, 0.8, "Ya ben?", C.navy, 44.8 + 4.0, t);
+    } else {
+      const lt2 = t - 50.6;
+      ctx.fillStyle = "#f1e3c9"; ctx.fillRect(0, 0, CW, CH);
+      ctx.fillStyle = "#e6d3b1"; for (let x = 0; x < CW; x += 120) ctx.fillRect(x, 0, 60, 1180);
+      ctx.fillStyle = "#b07a4b"; ctx.fillRect(0, 1180, CW, CH);
+      // friends patting bellies
+      FRIENDS.forEach((fo, i) => person(560 + i * 170, 1330, 0.95, { ...fo, facing: -1, arms: "pat", face: "laugh", breathe: true }, t));
+      // table with empty plate
+      rr(140, 1110, 600, 30, 8, "#8a5a3b"); ctx.fillStyle = "#7a4d30"; ctx.fillRect(170, 1130, 24, 200); ctx.fillRect(686, 1130, 24, 200);
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(440, 1100, 150, 26, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#ddd"; ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(440, 1100, 110, 17, 0, 0, 7); ctx.stroke();
+      for (let i = 0; i < 9; i++) circ(380 + i * 15, 1098 + (i % 3) * 4, 4, "#8a4b2a");
+      person(190, 1330, 0.95, { ...HAMSI, arms: "shrug", face: "laugh", breathe: true }, t);
+      // sweat drop
+      ctx.fillStyle = "#7cc6e0"; ctx.beginPath(); ctx.ellipse(250, 990 + Math.sin(t * 4) * 4, 10, 16, 0, 0, 7); ctx.fill();
+      // timer
+      const k = backOut((lt2 - 0.2) / 0.4);
+      if (k > 0) { ctx.save(); ctx.translate(540, 700); ctx.scale(k, k); circ(0, 0, 120, C.amber); outlined("5 dk!", 0, 26, 78, 900, "#fff", C.navy, 14); ctx.restore(); }
+    }
+  }
+
+  function sceneEnd(t) { // 53.2..60
+    const lt = t - 53.2;
+    sky("#1d3557", "#1f9e8f");
+    for (let i = 0; i < 40; i++) { const x = (i * 97 + lt * 40 * (1 + i % 3)) % CW, y = (i * 211) % CH; circ(x, y, 3 + i % 4, "rgba(255,255,255,0.12)"); }
+    const k1 = backOut((lt - 0.1) / 0.5), k2 = backOut((lt - 0.4) / 0.5);
+    ctx.save(); ctx.translate(CW / 2, 470); ctx.scale(k1, k1); outlined("HAMSİCAN", 0, 0, 130, 900, "#fff", C.navy, 22); ctx.restore();
+    ctx.save(); ctx.translate(CW / 2, 580); ctx.scale(k2, k2); outlined("dönemi açtı!", 0, 0, 74, 900, C.amber, C.navy, 16); ctx.restore();
+    person(CW / 2 - 20, 1180, 1.25, { ...HAMSI, arms: "wave", face: "big", breathe: true }, t);
+    const stats = [["~760 km", "yol"], ["11 saat", "yolculuk"], ["2 kg", "köfte"], ["5 dk", "dayandı"]];
+    stats.forEach(([v, l], i) => {
+      const k = backOut((lt - 0.9 - i * 0.25) / 0.4); if (k <= 0) return;
+      const x = 150 + (i % 2) * 390 + (i % 2) * 0, y = 1230 + Math.floor(i / 2) * 150;
+      ctx.save(); ctx.translate(x + 195 - 150 + (i % 2 ? 0 : 0), y); ctx.scale(k, k);
+      rr(-170, -20, 340, 130, 26, "rgba(255,255,255,0.95)");
+      txt(v, 0, 54, 54, 900, C.navy, "center", DISP); txt(l, 0, 94, 28, 700, "#4a6070", "center");
+      ctx.restore();
+    });
+  }
+
+  // ---------- overlays ----------
+  const SCENES = [[0, 4, sceneTitle], [4, 14, sceneHome], [14, 18.4, sceneOtogar], [18.4, 23.4, sceneTraffic], [23.4, 28.8, sceneMap],
+                  [28.8, 34, sceneMola], [34, 37.2, sceneNight], [37.2, 40.2, sceneWindow], [40.2, 44.8, sceneKonya], [44.8, 53.2, sceneYurt], [53.2, 60, sceneEnd]];
+  const CUTS = [4, 14, 18.4, 23.4, 28.8, 34, 37.2, 40.2, 44.8, 50.6, 53.2];
+  const PLACES = [[4, 14, "Çorlu, Tekirdağ"], [14, 18.4, "Çorlu Otogarı"], [18.4, 23.4, "İstanbul, TEM otoyolu"], [28.8, 34, "Bozüyük, Bilecik"],
+                  [34, 40.2, "Eskişehir – Afyon yolu"], [40.2, 44.8, "Konya"], [44.8, 53.2, "Yurt, Konya"]];
+  const PROG = [[4, 0], [14, 0], [18.4, 0.03], [23.4, fracOf(2)], [28.8, fracOf(9)], [34, fracOf(9) + 0.01], [40.2, 0.93], [44.8, 1]];
+  function progAt(t) { for (let i = 0; i < PROG.length - 1; i++) if (t <= PROG[i + 1][0]) return lerp(PROG[i][1], PROG[i + 1][1], lin(t, PROG[i][0], PROG[i + 1][0])); return 1; }
+
+  function hud(t) {
+    if (t < 4.2 || (t > 23.4 && t < 28.8) || t > 53.2) return;
+    const a = seg(t, 4.2, 4.6) * (1 - seg(t, 52.8, 53.2));
+    ctx.save(); ctx.globalAlpha = a;
+    rr(60, 236, 960, 116, 30, "rgba(29,53,87,0.88)");
+    txt("ÇORLU", 92, 286, 30, 900, "#fff", "left", BODY, 2); txt("KONYA", 988, 286, 30, 900, "#fff", "right", BODY, 2);
+    const x0 = 100, x1 = 980, y = 318, p = progAt(t);
+    ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 8; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+    ctx.strokeStyle = C.amber; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(lerp(x0, x1, p), y); ctx.stroke();
+    for (const [n, idx] of [["İst.", 2], ["Bozüyük", 9], ["Afyon", 12]]) {
+      const x = lerp(x0, x1, fracOf(idx)); circ(x, y, 9, fracOf(idx) <= p ? C.amber : "#8597ad");
+      txt(n, x, 286, 22, 700, "rgba(255,255,255,0.75)", "center");
+    }
+    ctx.save(); ctx.translate(lerp(x0, x1, p), y - 4); ctx.scale(0.075, 0.075); bus(-375, 160, 1, { ham: false }, t); ctx.restore();
+    ctx.restore();
+    for (const [a0, a1, name] of PLACES) {
+      if (t < a0 || t > a1) continue;
+      const k = seg(t, a0 + 0.1, a0 + 0.45) * (1 - seg(t, a1 - 0.25, a1));
+      ctx.save(); ctx.globalAlpha = k;
+      ctx.font = `800 34px ${BODY}`; const w = ctx.measureText(name).width + 90;
+      rr(60, 372, w, 64, 32, "#fff");
+      ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(96, 398, 13, Math.PI, 0); ctx.lineTo(96, 422); ctx.closePath(); ctx.fill(); circ(96, 398, 5, "#fff");
+      txt(name, 122, 416, 34, 800, C.ink, "left");
+      ctx.restore();
+    }
+  }
+
+  function subtitles(t) {
+    const s = SUBS.find(x => t >= x.start - 0.05 && t <= x.end + 0.3);
+    if (!s) return;
+    const a = seg(t, s.start - 0.05, s.start + 0.15) * (1 - seg(t, s.end + 0.1, s.end + 0.3));
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.font = `800 44px ${BODY}`;
+    const lines = wrap(s.text, 900);
+    const h = lines.length * 58 + 34, y0 = 1560 - h / 2;
+    const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 60;
+    rr(CW / 2 - w / 2, y0, w, h, 22, "rgba(10,14,22,0.72)");
+    lines.forEach((l, i) => txt(l, CW / 2, y0 + 62 + i * 58, 44, 800, "#fff", "center"));
+    ctx.restore();
+  }
+
+  function render(t) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.lineCap = "butt"; ctx.lineJoin = "miter"; ctx.setLineDash([]);
+    const sc = SCENES.find(s => t >= s[0] && t < s[1]) || SCENES[SCENES.length - 1];
+    sc[2](t);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+    hud(t);
+    subtitles(t);
+    for (const c of CUTS) { const d = Math.abs(t - c); if (d < 0.18) { ctx.fillStyle = `rgba(255,255,255,${(1 - d / 0.18) * 0.9})`; ctx.fillRect(0, 0, CW, CH); } }
+    const black = Math.max(1 - seg(t, 0, 0.4), seg(t, DUR - 0.6, DUR));
+    if (black > 0) { ctx.fillStyle = `rgba(0,0,0,${black})`; ctx.fillRect(0, 0, CW, CH); }
+  }
+
+  window.VIDEO = { FPS, DUR, NF };
+  window.renderFrame = i => render(i / FPS);
+  if (location.hash !== "#render") {
+    let start = null;
+    const loop = now => { if (start === null) start = now; const f = Math.floor((now - start) / 1000 * FPS) % NF; render(f / FPS); requestAnimationFrame(loop); };
+    document.fonts.ready.then(() => requestAnimationFrame(loop));
+  }
+})();
+</script>
+</body>
+</html>
