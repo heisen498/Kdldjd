@@ -27,5 +27,11 @@ buf = buf / max(1e-6, np.abs(buf).max()) * 0.9
 with wave.open(out, 'wb') as w:
     w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
     w.writeframes((buf * 32767).astype(np.int16).tobytes())
+# per-frame loudness envelope (30 fps) for lip sync
+hop = sr // 30
+env = [float(np.sqrt(np.mean(buf[i * hop:(i + 1) * hop] ** 2))) for i in range(len(buf) // hop)]
+ref = float(np.percentile([e for e in env if e > 0.01] or [1], 90))
+env = [round(min(1.0, e / ref), 3) for e in env]
 with open(tjs, 'w') as f:
     f.write("window.SUBS = " + json.dumps(timings, ensure_ascii=False, indent=1) + ";\n")
+    f.write("window.ENV = " + json.dumps(env) + ";\n")
