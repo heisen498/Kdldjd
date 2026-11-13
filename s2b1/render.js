@@ -17,7 +17,7 @@ function serve(port) {
   const port = stills ? 8766 : Number(process.argv[5] || 8767);
   const srv = serve(port);
   // GPU=1 opens a visible Chromium window so your graphics card does the 3D work (much faster than software rendering).
-  const gpu = process.env.GPU === '1';
+  const gpu = (process.env.GPU || '').trim() === '1';
   const b = await chromium.launch(gpu ? { headless: false, args: ['--ignore-gpu-blocklist', '--enable-gpu-rasterization'] } : {});
   const p = await b.newPage({ viewport: { width: 540, height: 960 } });
   p.on('pageerror', e => console.error('PAGEERR', e.message));

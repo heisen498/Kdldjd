@@ -19,7 +19,8 @@ Kurulumdan sonra Komut İstemi'ni kapatıp yeniden aç.
     npx playwright install chromium
 
 ## 3. Videoyu işle (ekran kartıyla)
-    set GPU=1 && node render.js goruntu.mp4
+    set GPU=1
+    node render.js goruntu.mp4
 
 Bir Chromium penceresi açılır; işlem bitene kadar kapatma. İlerleme her 150 karede bir yazılır (toplam 1800 kare).
 
