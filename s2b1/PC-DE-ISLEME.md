@@ -32,3 +32,8 @@ Bir Chromium penceresi açılır; işlem bitene kadar kapatma. İlerleme her 150
 ## Sadece izlemek istersen
     npx http-server -p 8080
 Tarayıcıda http://localhost:8080/s2b1.html adresini aç; animasyon gerçek zamanlı oynar (altyazılı, sessiz).
+
+## Bozulma geçişli tam sürüm
+`goruntu.mp4` hazır olduktan sonra (önce `git pull` ile `gecis.mp4` ve `tam_ses.m4a` dosyalarını al):
+
+    ffmpeg -i gecis.mp4 -i goruntu.mp4 -i tam_ses.m4a -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" -map "[v]" -map 2:a -c:v libx264 -crf 19 -preset fast -pix_fmt yuv420p -c:a copy -shortest -movflags +faststart paspasli-diplomat-s2b1.mp4
